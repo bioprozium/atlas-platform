@@ -1,0 +1,116 @@
+# Local environments and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+.envrc
+secrets/
+credentials.json
+*.local.yml
+*.local.yaml
+*.local.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.mobileprovision
+*.provisionprofile
+Config.local.xcconfig
+local.properties
+
+# Python environments, caches, and packaging
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# JavaScript and TypeScript
+node_modules/
+.next/
+.nuxt/
+.vite/
+.turbo/
+.parcel-cache/
+.pnpm-store/
+*.tsbuildinfo
+.npmrc.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build and test outputs
+build/
+dist/
+coverage/
+test-results/
+playwright-report/
+*.log
+
+# Android and Gradle
+.gradle/
+.kotlin/
+.externalNativeBuild/
+.cxx/
+captures/
+*.apk
+*.aab
+
+# Swift and Xcode
+.build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.ipa
+*.xcarchive/
+*.dSYM/
+*.dSYM.zip
+
+# Blender backups and local processing output
+*.blend[0-9]*
+/processing/cache/
+/processing/output/
+
+# Local database files and dumps
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db-journal
+*.db-wal
+*.db-shm
+*.pgdump
+*.dump
+/deployment/pgdata/
+
+# Local infrastructure state
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+crash.log
+
+# OS and editor state
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
