@@ -27,4 +27,4 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["integration: requires a disposable local PostgreSQL 16 database"]
+markers = ["integration: starts a disposable cluster using PostgreSQL 16 server tools"]

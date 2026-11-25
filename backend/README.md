@@ -20,21 +20,15 @@ python -m pip install -e '.[test]'
 
 ## Configure PostgreSQL
 
-Use a disposable local PostgreSQL 16 instance for development and integration tests. On a fresh instance, run the following in `psql` as a local database administrator. The password commands prompt interactively.
+For manual development, connect to the `postgres` database on a fresh local PostgreSQL 16 instance as a database administrator. From `backend/`, run the following in `psql`. The provisioning script switches to `atlas_db`, and the password commands prompt interactively.
 
-```sql
-CREATE ROLE atlas_owner NOLOGIN;
-CREATE ROLE atlas_app LOGIN;
-CREATE ROLE atlas_migrator LOGIN;
-GRANT atlas_owner TO atlas_migrator WITH INHERIT FALSE, SET TRUE;
+```text
+\i provision_local.sql
 \password atlas_app
 \password atlas_migrator
-CREATE DATABASE atlas_db WITH ENCODING 'UTF8' TEMPLATE template0;
-\connect atlas_db
-REVOKE ALL ON DATABASE atlas_db FROM PUBLIC;
-GRANT CONNECT ON DATABASE atlas_db TO atlas_app, atlas_migrator;
-CREATE SCHEMA atlas AUTHORIZATION atlas_owner;
 ```
+
+The [provisioning script](provision_local.sql) follows the P0.3 access model. `atlas_owner` owns `atlas_db` and the `atlas` schema. `atlas_app` has schema `USAGE` and receives `SELECT` on future tables created by `atlas_owner` in `atlas`. `atlas_migrator` acquires owner privileges through `SET ROLE atlas_owner`.
 
 Copy `.env.example` to the ignored `.env` file in `backend/`. Add the corresponding local passwords to the URLs and percent-encode any URL-reserved characters in them. The example assumes a loopback connection on port 5432.
 
@@ -70,11 +64,9 @@ From `backend/` with the virtual environment active, run unit tests without Post
 python -m pytest -m 'not integration'
 ```
 
-With the local URLs loaded, pass them to the integration tests explicitly. The tests check PostgreSQL 16 connectivity, readiness during a connection failure, migration state, and ownership of the version table. The migration test applies migrations to the database supplied in the test environment.
+**Integration tests apply migrations to a disposable PostgreSQL 16 cluster created and removed by pytest.** The fixture uses a private Unix socket with TCP disabled and generates its own connection URLs. Put the PostgreSQL 16 server tools (`initdb`, `pg_ctl`, and `psql`) on `PATH` and run pytest as a regular user. The suite checks readiness, migration ownership, and the runtime role's read-only access.
 
 ```sh
-ATLAS_TEST_DATABASE_URL="$ATLAS_DATABASE_URL" \
-ATLAS_TEST_MIGRATION_DATABASE_URL="$ATLAS_MIGRATION_DATABASE_URL" \
 python -m pytest -m integration
 ```
 
