@@ -151,6 +151,7 @@ scene_node_anatomy_links = Table(
     # Both referenced rows must carry the same exact registry version.
     Column("asset_version_id", Uuid, nullable=False),
     Column("structure_id", Uuid, nullable=False),
+    Column("role_snapshot", String(CODE_LENGTH)),
     UniqueConstraint(
         "scene_node_id", "anatomy_asset_link_id", name="uq_scene_node_anatomy_links_pair"
     ),

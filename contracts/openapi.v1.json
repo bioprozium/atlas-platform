@@ -647,6 +647,7 @@
                 "type": "null"
               }
             ],
+            "description": "Registry role captured when the draft mapping was saved.",
             "title": "Role"
           },
           "structure_code": {
@@ -2313,7 +2314,7 @@
                 }
               }
             },
-            "description": "The scene database or required published asset versions are unavailable."
+            "description": "The scene database, required published asset versions, or required published anatomy structures are unavailable."
           }
         },
         "summary": "Get Scene",
@@ -2393,7 +2394,7 @@
                 }
               }
             },
-            "description": "The scene database or required published asset versions are unavailable."
+            "description": "The scene database, required published asset versions, or required published anatomy structures are unavailable."
           }
         },
         "summary": "Get Version",
@@ -2501,7 +2502,7 @@
                 }
               }
             },
-            "description": "The scene database or required published asset versions are unavailable."
+            "description": "The scene database, required published asset versions, or required published anatomy structures are unavailable."
           }
         },
         "summary": "List Nodes",

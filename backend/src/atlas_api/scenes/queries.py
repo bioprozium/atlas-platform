@@ -4,12 +4,12 @@ from collections import defaultdict
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import Connection, RowMapping, or_, select, true
+from sqlalchemy import Connection, RowMapping, case, or_, select, true
 
 from atlas_api.anatomy.models import anatomical_structures
 from atlas_api.anatomy.queries import fetch_page
 from atlas_api.anatomy.schemas import Page, Pagination
-from atlas_api.assets.models import anatomy_asset_links, asset_versions, assets
+from atlas_api.assets.models import asset_versions, assets
 from atlas_api.assets.queries import PUBLISHED_ASSET, PUBLISHED_VERSION
 from atlas_api.scenes.models import scene_node_anatomy_links, scene_nodes, scene_versions, scenes
 from atlas_api.scenes.schemas import (
@@ -29,7 +29,6 @@ asset = assets.c
 asset_version = asset_versions.c
 structure = anatomical_structures.c
 mapping = scene_node_anatomy_links.c
-anatomy_link = anatomy_asset_links.c
 
 SCENE_FIELDS = (scene.code, scene.title)
 VERSION_FIELDS = (
@@ -58,11 +57,25 @@ ASSETS_AVAILABLE = ~(
     .exists()
 )
 
+# The mapping pins a structure through the registry's foreign keys.
+ANNOTATIONS_AVAILABLE = ~(
+    select(1)
+    .select_from(
+        scene_nodes.join(scene_node_anatomy_links, node.id == mapping.scene_node_id).join(
+            anatomical_structures, mapping.structure_id == structure.id
+        )
+    )
+    .where(node.scene_version_id == version.id, structure.review_state != "published")
+    .correlate(scene_versions)
+    .exists()
+)
+DEPENDENCIES_AVAILABLE = ASSETS_AVAILABLE & ANNOTATIONS_AVAILABLE
+
 
 def list_scenes(connection: Connection, filters: Pagination) -> Page[SceneSummary]:
     latest = (
         select(*VERSION_FIELDS)
-        .where(version.scene_id == scene.id, PUBLISHED_SCENE_VERSION, ASSETS_AVAILABLE)
+        .where(version.scene_id == scene.id, PUBLISHED_SCENE_VERSION, DEPENDENCIES_AVAILABLE)
         .order_by(*VERSION_ORDER)
         .limit(1)
         .lateral("latest")
@@ -92,7 +105,11 @@ def get_scene(connection: Connection, code: str) -> RowMapping | None:
     query = select(
         scene.id,
         *SCENE_FIELDS,
-        published.where(ASSETS_AVAILABLE).exists().label("assets_available"),
+        case(
+            (published.where(DEPENDENCIES_AVAILABLE).exists(), None),
+            (published.where(ASSETS_AVAILABLE).exists(), "anatomy"),
+            else_="assets",
+        ).label("unavailable_dependency"),
     ).where(scene.code == code, PUBLISHED_SCENE, published.exists())
     return connection.execute(query).mappings().one_or_none()
 
@@ -102,7 +119,7 @@ def list_versions(
 ) -> Page[SceneVersion]:
     query = (
         select(*VERSION_FIELDS)
-        .where(version.scene_id == scene_id, PUBLISHED_SCENE_VERSION, ASSETS_AVAILABLE)
+        .where(version.scene_id == scene_id, PUBLISHED_SCENE_VERSION, DEPENDENCIES_AVAILABLE)
         .order_by(*VERSION_ORDER)
     )
     rows, has_more = fetch_page(connection, query, filters)
@@ -117,7 +134,13 @@ def list_versions(
 def get_version(connection: Connection, code: str, identifier: str) -> RowMapping | None:
     query = (
         select(
-            version.id, *SCENE_FIELDS, *VERSION_FIELDS, ASSETS_AVAILABLE.label("assets_available")
+            version.id,
+            *SCENE_FIELDS,
+            *VERSION_FIELDS,
+            case(
+                (~ASSETS_AVAILABLE, "assets"),
+                (~ANNOTATIONS_AVAILABLE, "anatomy"),
+            ).label("unavailable_dependency"),
         )
         .select_from(scenes.join(scene_versions, scene.id == version.scene_id))
         .where(
@@ -137,17 +160,17 @@ def anatomy_links_by_node(
     if rows:
         query = (
             select(
-                mapping.scene_node_id, structure.code.label("structure_code"), anatomy_link.role
+                mapping.scene_node_id,
+                structure.code.label("structure_code"),
+                mapping.role_snapshot.label("role"),
             )
             .select_from(
                 scene_node_anatomy_links.join(
-                    anatomy_asset_links, mapping.anatomy_asset_link_id == anatomy_link.id
-                ).join(anatomical_structures, anatomy_link.structure_id == structure.id)
+                    anatomical_structures, mapping.structure_id == structure.id
+                )
             )
-            .where(
-                mapping.scene_node_id.in_({row.id for row in rows}),
-                structure.review_state == "published",
-            )
+            # Version eligibility was checked across every node in the same database snapshot.
+            .where(mapping.scene_node_id.in_({row.id for row in rows}))
             .order_by(structure.code)
         )
         for row in connection.execute(query).mappings():

@@ -183,6 +183,7 @@ def upgrade() -> None:
         sa.Column("anatomy_asset_link_id", sa.Uuid(), nullable=False),
         sa.Column("asset_version_id", sa.Uuid(), nullable=False),
         sa.Column("structure_id", sa.Uuid(), nullable=False),
+        sa.Column("role_snapshot", sa.String(80)),
         sa.UniqueConstraint(
             "scene_node_id", "anatomy_asset_link_id", name="uq_scene_node_anatomy_links_pair"
         ),
@@ -233,6 +234,7 @@ def add_scene_triggers() -> None:
         LANGUAGE plpgsql AS $$
         DECLARE
             pinned_asset record;
+            structure_state text;
         BEGIN
             IF TG_OP = 'INSERT' THEN
                 IF NEW.publication_state <> 'draft' THEN
@@ -287,6 +289,24 @@ def add_scene_triggers() -> None:
                         OR pinned_asset.publication_state <> 'published'
                     THEN
                         RAISE EXCEPTION 'Scene version references an ineligible asset version'
+                            USING ERRCODE = '23514';
+                    END IF;
+                END LOOP;
+                -- Every explicit annotation is a required dependency of the published graph.
+                FOR structure_state IN
+                    SELECT structure.review_state
+                    FROM atlas.anatomical_structures AS structure
+                    WHERE EXISTS (
+                        SELECT 1 FROM atlas.scene_node_anatomy_links AS mapping
+                        JOIN atlas.scene_nodes AS node ON node.id = mapping.scene_node_id
+                        WHERE node.scene_version_id = NEW.id
+                            AND mapping.structure_id = structure.id
+                    )
+                    ORDER BY structure.id
+                    FOR SHARE OF structure
+                LOOP
+                    IF structure_state <> 'published' THEN
+                        RAISE EXCEPTION 'Scene version references an unpublished anatomy structure'
                             USING ERRCODE = '23514';
                     END IF;
                 END LOOP;
@@ -353,6 +373,13 @@ def add_scene_triggers() -> None:
             END IF;
             IF TG_OP = 'DELETE' THEN
                 RETURN OLD;
+            END IF;
+            IF TG_TABLE_NAME = 'scene_node_anatomy_links' THEN
+                -- The same draft guard protects the captured role on published versions.
+                SELECT link.role INTO NEW.role_snapshot
+                    FROM atlas.anatomy_asset_links AS link
+                    WHERE link.id = NEW.anatomy_asset_link_id
+                    FOR SHARE OF link;
             END IF;
             RETURN NEW;
         END;

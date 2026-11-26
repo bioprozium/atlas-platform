@@ -57,7 +57,9 @@ class SceneAssetReference(BaseModel):
 
 class SceneAnatomyLink(BaseModel):
     structure_code: str
-    role: str | None
+    role: str | None = Field(
+        description="Registry role captured when the draft mapping was saved."
+    )
 
 
 class SceneNode(BaseModel):

@@ -13,7 +13,10 @@ from atlas_api.scenes import queries
 from atlas_api.scenes.schemas import SceneDetail, SceneNodesPage, SceneSummary, SceneVersionDetail
 
 DATABASE_UNAVAILABLE = "Scene database unavailable."
-ASSETS_UNAVAILABLE = "Scene asset versions unavailable."
+DEPENDENCY_ERRORS = {
+    "assets": "Scene asset versions unavailable.",
+    "anatomy": "Scene anatomy annotations unavailable.",
+}
 SCENE_NOT_FOUND = {
     404: {"model": ErrorResponse, "description": "The published scene was not found."}
 }
@@ -23,7 +26,10 @@ VERSION_NOT_FOUND = {
 DEPENDENCIES_UNAVAILABLE = {
     503: {
         "model": ErrorResponse,
-        "description": "The scene database or required published asset versions are unavailable.",
+        "description": (
+            "The scene database, required published asset versions, or "
+            "required published anatomy structures are unavailable."
+        ),
     }
 }
 
@@ -37,8 +43,8 @@ router = APIRouter(
 def require_available(row: RowMapping | None, not_found: str) -> RowMapping:
     if row is None:
         raise HTTPException(404, not_found)
-    if not row.assets_available:
-        raise HTTPException(503, ASSETS_UNAVAILABLE)
+    if row.unavailable_dependency is not None:
+        raise HTTPException(503, DEPENDENCY_ERRORS[row.unavailable_dependency])
     return row
 
 

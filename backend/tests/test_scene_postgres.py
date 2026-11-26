@@ -191,7 +191,10 @@ def scene_engine(postgres_url, synthetic_glb):
         ]:
             connection.execute(
                 anatomy_asset_links.insert().values(
-                    id=link_id, structure_id=structure_id, version_id=pin, role="context"
+                    id=link_id,
+                    structure_id=structure_id,
+                    version_id=pin,
+                    role=None if link_id == V2_LINK else "context",
                 )
             )
         connection.execute(
@@ -233,7 +236,7 @@ def scene_engine(postgres_url, synthetic_glb):
             )
         )
         connection.execute(add_mapping(MESH, PUBLIC_LINK, PIN_V1, id=MESH_MAPPING))
-        connection.execute(add_mapping(MESH, DRAFT_LINK, PIN_V1, DRAFT_STRUCTURE))
+        connection.execute(add_mapping(GROUP_WITH_ASSET, V2_LINK, PIN_V2))
         connection.execute(add_node(V2, "root"))
         for version_id in (V1, V2, WITHDRAWN):
             connection.execute(publish(version_id))
@@ -502,6 +505,7 @@ def test_published_and_withdrawn_graphs_are_immutable(owner):
         node_delete,
         add_mapping(GROUP_WITH_ASSET, V2_LINK, PIN_V2),
         mapping_update.values(anatomy_asset_link_id=DRAFT_LINK),
+        mapping_update.values(role_snapshot=None),
         mapping_delete,
         text("TRUNCATE atlas.scene_node_anatomy_links"),
     ):
@@ -517,9 +521,15 @@ def test_published_and_withdrawn_graphs_are_immutable(owner):
         change_version(V1, publication_state="draft"),
         change_node(MESH, translation=[3, 2, 1]),
         node_delete,
+        mapping_update.values(role_snapshot="replacement"),
         mapping_delete,
     ):
         violates(owner, statement)
+    owner.execute(
+        anatomy_asset_links.update()
+        .where(anatomy_asset_links.c.id == PUBLIC_LINK)
+        .values(role="replacement")
+    )
     assert owner.execute(select(scene_nodes).where(scene_nodes.c.id == MESH)).one() == node_before
     assert (
         owner.execute(
@@ -527,6 +537,50 @@ def test_published_and_withdrawn_graphs_are_immutable(owner):
         ).one()
         == mapping_before
     )
+
+
+def test_draft_mapping_captures_role_again_when_saved(owner):
+    node_id = owner.scalar(
+        add_node(DRAFT, "annotated", asset_version_id=PIN_V1).returning(scene_nodes.c.id)
+    )
+    mapping_id = owner.scalar(
+        add_mapping(node_id, PUBLIC_LINK, PIN_V1, role_snapshot="provided").returning(
+            scene_node_anatomy_links.c.id
+        )
+    )
+    mapping = scene_node_anatomy_links.c
+    saved_role = select(mapping.role_snapshot).where(mapping.id == mapping_id)
+    assert owner.execute(saved_role).scalar_one() == "context"
+
+    owner.execute(
+        anatomy_asset_links.update()
+        .where(anatomy_asset_links.c.id == PUBLIC_LINK)
+        .values(role=None)
+    )
+    assert owner.execute(saved_role).scalar_one() == "context"
+    owner.execute(change_version(DRAFT, spatial_review_reference=REVIEW))
+    owner.execute(
+        scene_node_anatomy_links.update()
+        .where(mapping.id == mapping_id)
+        .values(role_snapshot="provided")
+    )
+    assert owner.execute(saved_role).scalar_one() is None
+    review = select(scene_versions.c.spatial_review_reference).where(scene_versions.c.id == DRAFT)
+    assert owner.execute(review).scalar_one() is None
+
+
+def test_publication_requires_published_annotated_structures(owner):
+    node_id = owner.scalar(
+        add_node(DRAFT, "annotated", asset_version_id=PIN_V1).returning(scene_nodes.c.id)
+    )
+    owner.execute(add_mapping(node_id, DRAFT_LINK, PIN_V1, DRAFT_STRUCTURE))
+    violates(owner, publish(DRAFT))
+    owner.execute(
+        anatomical_structures.update()
+        .where(anatomical_structures.c.id == DRAFT_STRUCTURE)
+        .values(review_state="published")
+    )
+    owner.execute(publish(DRAFT))
 
 
 def concurrent_write(engine, first_statement, second_statement, isolation_level, error_type):
@@ -660,6 +714,32 @@ def test_publication_checks_concurrent_asset_withdrawal(scene_engine):
             connection.execute(asset_status.values(publication_state="published"))
 
 
+def test_publication_checks_concurrent_anatomy_unpublication(scene_engine):
+    with scene_engine.begin() as connection:
+        set_owner(connection)
+        version_id = add_version(connection, SCENE_ID, "concurrent-anatomy")
+        node_id = connection.scalar(
+            add_node(version_id, "annotated", asset_version_id=PIN_V1).returning(scene_nodes.c.id)
+        )
+        connection.execute(add_mapping(node_id, PUBLIC_LINK, PIN_V1))
+    status = anatomical_structures.update().where(anatomical_structures.c.id == PUBLIC_STRUCTURE)
+    try:
+        assert (
+            concurrent_write(
+                scene_engine,
+                status.values(review_state="draft"),
+                publish(version_id),
+                "READ COMMITTED",
+                IntegrityError,
+            )
+            == "23514"
+        )
+    finally:
+        with scene_engine.begin() as connection:
+            set_owner(connection)
+            connection.execute(status.values(review_state="published"))
+
+
 def test_api_deterministic_pagination_metadata_and_exact_asset_references(client):
     page = read(client, "", limit=1)
     assert (page["limit"], page["offset"], page["has_more"]) == (1, 0, True)
@@ -710,7 +790,7 @@ def test_api_deterministic_pagination_metadata_and_exact_asset_references(client
     assert mesh["anatomy_links"] == [{"structure_code": "synthetic-region", "role": "context"}]
     assert group["node_type"] == "group"
     assert group["asset"] == {"code": "synthetic-mesh", "version": "v2"}
-    assert group["anatomy_links"] == []
+    assert group["anatomy_links"] == [{"structure_code": "synthetic-region", "role": None}]
     assert read(client, nodes, offset=3)["items"] == []
 
 
@@ -761,9 +841,67 @@ def test_api_rejects_whole_version_when_any_pinned_asset_is_withdrawn(
             connection.execute(statement.values({status_column: "published"}))
 
 
-def test_scene_discovery_when_no_published_version_is_eligible(client, scene_engine):
-    code = "temporarily-unavailable"
-    pin_status = asset_versions.update().where(asset_versions.c.id == PIN_V1)
+def test_published_nodes_return_saved_roles_after_registry_edits(client, scene_engine):
+    nodes = f"{DEMO_V1}/nodes"
+    before = read(client, nodes)
+    link = anatomy_asset_links.c
+    change_roles = anatomy_asset_links.update().where(link.id.in_([PUBLIC_LINK, V2_LINK]))
+    try:
+        with scene_engine.begin() as connection:
+            set_owner(connection)
+            result = connection.execute(change_roles.values(role="changed"))
+            assert result.rowcount == 2
+        assert read(client, nodes) == before
+    finally:
+        with scene_engine.begin() as connection:
+            set_owner(connection)
+            connection.execute(
+                change_roles.values(role=case((link.id == PUBLIC_LINK, "context"), else_=None))
+            )
+
+
+def test_unpublished_structure_blocks_every_page_until_republished(client, scene_engine):
+    nodes = f"{DEMO_V1}/nodes"
+    before = read(client, nodes)
+    status = anatomical_structures.update().where(anatomical_structures.c.id == PUBLIC_STRUCTURE)
+    try:
+        with scene_engine.begin() as connection:
+            set_owner(connection)
+            connection.execute(status.values(review_state="draft"))
+        for path in (DEMO_V1, f"{nodes}?limit=1", f"{nodes}?offset=100"):
+            response = client.get(f"{PREFIX}{path}")
+            assert response.status_code == 503
+            assert response.json() == {"detail": "Scene anatomy annotations unavailable."}
+        assert [item["version"] for item in read(client, DEMO)["versions"]["items"]] == ["v2"]
+        assert read(client, "")["items"][1]["latest_version"]["version"] == "v2"
+    finally:
+        with scene_engine.begin() as connection:
+            set_owner(connection)
+            connection.execute(status.values(review_state="published"))
+    assert read(client, nodes) == before
+
+
+@pytest.mark.parametrize(
+    ("dependency", "detail"),
+    [
+        ("assets", "Scene asset versions unavailable."),
+        ("anatomy", "Scene anatomy annotations unavailable."),
+    ],
+)
+def test_scene_discovery_when_no_published_version_is_eligible(
+    client, scene_engine, dependency, detail
+):
+    code = f"temporarily-unavailable-{dependency}"
+    if dependency == "assets":
+        status = asset_versions.update().where(asset_versions.c.id == PIN_V1)
+        unpublished = status.values(publication_state="withdrawn")
+        republished = status.values(publication_state="published")
+    else:
+        status = anatomical_structures.update().where(
+            anatomical_structures.c.id == PUBLIC_STRUCTURE
+        )
+        unpublished = status.values(review_state="draft")
+        republished = status.values(review_state="published")
     with scene_engine.begin() as connection:
         set_owner(connection)
         scene_id = connection.scalar(
@@ -772,19 +910,22 @@ def test_scene_discovery_when_no_published_version_is_eligible(client, scene_eng
             .returning(scenes.c.id)
         )
         version_id = add_version(connection, scene_id, "v1")
-        connection.execute(add_node(version_id, "root", asset_version_id=PIN_V1))
+        node_id = connection.scalar(
+            add_node(version_id, "root", asset_version_id=PIN_V1).returning(scene_nodes.c.id)
+        )
+        connection.execute(add_mapping(node_id, PUBLIC_LINK, PIN_V1))
     assert client.get(f"{PREFIX}/{code}").status_code == 404
     try:
         with scene_engine.begin() as connection:
             set_owner(connection)
             connection.execute(publish(version_id))
-            connection.execute(pin_status.values(publication_state="withdrawn"))
+            connection.execute(unpublished)
         assert code not in [item["code"] for item in read(client, "")["items"]]
         response = client.get(f"{PREFIX}/{code}?offset=100")
         assert response.status_code == 503
-        assert response.json() == {"detail": "Scene asset versions unavailable."}
+        assert response.json() == {"detail": detail}
     finally:
         with scene_engine.begin() as connection:
             set_owner(connection)
-            connection.execute(pin_status.values(publication_state="published"))
+            connection.execute(republished)
             connection.execute(change_version(version_id, publication_state="withdrawn"))
