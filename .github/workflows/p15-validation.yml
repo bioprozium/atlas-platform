@@ -34,11 +34,12 @@ jobs:
           git diff --check 56fe8af HEAD
           ruff check --isolated --select E4,E7,E9,F backend processing
           node --check processing/ingestion/validator.cjs
-      - name: Build packages
+      - name: Build backend distributions and verify the processing runtime
         if: ${{ !cancelled() }}
         run: |
           python -m build --outdir "$RUNNER_TEMP/atlas-dist" backend
-          npm pack ./processing/ingestion --dry-run
+          python -m compileall -q processing/ingestion
+          npm --prefix processing/ingestion ls --depth=0
       - name: Check OpenAPI contract
         if: ${{ !cancelled() }}
         run: |
