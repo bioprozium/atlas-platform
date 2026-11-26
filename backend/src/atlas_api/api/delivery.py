@@ -17,7 +17,6 @@ from atlas_api.api.dependencies import read_connection
 from atlas_api.assets import queries as registry
 from atlas_api.assets import router as assets
 from atlas_api.assets.delivery import (
-    DELIVERY_BUSY,
     GLB_MIME,
     STORAGE_UNAVAILABLE,
     AssetFileResponse,
@@ -50,6 +49,7 @@ class NoStoreRoute(APIRoute):
 
 
 router = APIRouter(route_class=NoStoreRoute)
+MANIFEST_BUSY = "Scene manifest capacity unavailable."
 ERROR_HEADERS = {
     "Cache-Control": {"description": "Do not store errors.", "schema": {"type": "string"}}
 }
@@ -114,24 +114,27 @@ def get_scene_manifest(
 ) -> Response:
     """Retrieve the complete offline manifest for an exact published scene version."""
     settings = request.app.state.delivery_settings
-    with read_connection(request, scene_routes.DATABASE_UNAVAILABLE) as connection:
-        scene = scene_routes.require_available(
-            scenes.get_version(connection, code, version), "Scene version not found."
-        )
-        body, objects = build_manifest(connection, scene, settings)
+    slots = request.app.state.manifest_slots
+    if not slots.acquire(blocking=False):
+        raise HTTPException(503, MANIFEST_BUSY)
+    try:
+        with read_connection(request, scene_routes.DATABASE_UNAVAILABLE) as connection:
+            scene = scene_routes.require_available(
+                scenes.get_version(
+                    connection, code, version, origin_byte_limit=settings.max_manifest_bytes
+                ),
+                "Scene version not found.",
+            )
+            body, objects = build_manifest(connection, scene, settings)
 
-    if objects:
-        slots = request.app.state.delivery_slots
-        if not slots.acquire(blocking=False):
-            raise HTTPException(503, DELIVERY_BUSY)
         try:
             for obj in dict.fromkeys(objects):
                 with open_object(settings.storage_root, obj):
                     pass
         except (OSError, GLBValidationError):
             raise HTTPException(503, STORAGE_UNAVAILABLE) from None
-        finally:
-            slots.release()
+    finally:
+        slots.release()
     headers = cache_headers(sha256(body).hexdigest())
     if matches_etag(conditional_value(request), headers["ETag"]):
         return Response(status_code=304, headers=headers)
@@ -184,4 +187,5 @@ def get_asset_file(
         obj,
         request.app.state.delivery_slots,
         conditional_value(request),
+        send_timeout=request.app.state.delivery_settings.file_send_timeout,
     )

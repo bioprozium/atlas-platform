@@ -43,7 +43,9 @@ class DeliverySettings:
     max_nodes: int
     max_assets: int
     max_manifest_bytes: int
+    manifest_slots: int
     file_slots: int
+    file_send_timeout: int
 
     @classmethod
     def from_environment(cls) -> "DeliverySettings":
@@ -62,7 +64,9 @@ class DeliverySettings:
             max_nodes=_bounded_integer("ATLAS_MANIFEST_MAX_NODES", 2048, 10000),
             max_assets=_bounded_integer("ATLAS_MANIFEST_MAX_ASSETS", 256, 1024),
             max_manifest_bytes=_bounded_integer("ATLAS_MANIFEST_MAX_BYTES", 2**20, 8 * 2**20),
+            manifest_slots=_bounded_integer("ATLAS_MANIFEST_SLOTS", 1, 8),
             file_slots=_bounded_integer("ATLAS_DELIVERY_FILE_SLOTS", 2, 8),
+            file_send_timeout=_bounded_integer("ATLAS_DELIVERY_SEND_TIMEOUT_SECONDS", 120, 900),
         )
 
 

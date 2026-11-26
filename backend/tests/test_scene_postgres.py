@@ -1119,8 +1119,8 @@ def test_manifest_build_uses_one_snapshot(delivery_root, client, scene_engine, m
     original = queries.get_version
     pin = asset_versions.update().where(asset_versions.c.id == PIN_V1)
 
-    def withdraw_after_scene_read(*args):
-        scene = original(*args)
+    def withdraw_after_scene_read(*args, **kwargs):
+        scene = original(*args, **kwargs)
         with scene_engine.begin() as connection:
             set_owner(connection)
             connection.execute(pin.values(publication_state="withdrawn"))
@@ -1139,3 +1139,60 @@ def test_manifest_build_uses_one_snapshot(delivery_root, client, scene_engine, m
         with scene_engine.begin() as connection:
             set_owner(connection)
             connection.execute(pin.values(publication_state="published"))
+
+
+def test_manifest_rejects_oversized_origin_before_loading_nodes(
+    scene_engine, postgres_url, monkeypatch
+):
+    origin = "é" * 3000  # Fewer than 4096 characters, more than 4096 UTF-8 bytes.
+    with scene_engine.begin() as connection:
+        set_owner(connection)
+        version_id = add_version(connection, SCENE_ID, "oversized-origin")
+        connection.execute(change_version(version_id, origin_description=origin))
+        connection.execute(publish(version_id))
+
+    def unexpected_node_query(*args):
+        pytest.fail("Oversized origin must be rejected before reading scene nodes.")
+
+    monkeypatch.setattr(queries, "nodes_query", unexpected_node_query)
+    monkeypatch.setenv("ATLAS_MANIFEST_MAX_BYTES", "4096")
+    monkeypatch.setenv(RUNTIME_DATABASE_ENV, postgres_url(RUNTIME_ROLE).render_as_string())
+    original = queries.get_version
+
+    def check_projection(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if kwargs.get("origin_byte_limit") is not None:
+            assert result.origin_description is None
+        return result
+
+    monkeypatch.setattr(queries, "get_version", check_projection)
+    detail_path = f"{PREFIX}{DEMO}/versions/oversized-origin"
+    with TestClient(create_app()) as api:
+        response = api.get(f"{detail_path}/manifest", headers={"If-None-Match": "*"})
+        assert response.status_code == 503
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json() == {"detail": "Scene manifest serialized size limit exceeded."}
+        assert api.get(detail_path).json()["origin_description"] == origin
+
+
+def test_manifest_preflight_has_independent_bounded_capacity(delivery_root, client):
+    state = client.app.state
+    for _ in range(state.delivery_settings.file_slots):
+        assert state.delivery_slots.acquire(blocking=False)
+    try:
+        assert client.get(FILE).status_code == 503
+        assert client.get(MANIFEST).status_code == 200
+    finally:
+        for _ in range(state.delivery_settings.file_slots):
+            state.delivery_slots.release()
+
+    for _ in range(state.delivery_settings.manifest_slots):
+        assert state.manifest_slots.acquire(blocking=False)
+    try:
+        response = client.get(MANIFEST)
+        assert response.status_code == 503
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json() == {"detail": "Scene manifest capacity unavailable."}
+    finally:
+        for _ in range(state.delivery_settings.manifest_slots):
+            state.manifest_slots.release()

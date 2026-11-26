@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import Connection, RowMapping, Select, case, or_, select, true
+from sqlalchemy import Connection, RowMapping, Select, case, func, or_, select, true
 
 from atlas_api.anatomy.models import anatomical_structures
 from atlas_api.anatomy.queries import fetch_page
@@ -31,14 +31,14 @@ structure = anatomical_structures.c
 mapping = scene_node_anatomy_links.c
 
 SCENE_FIELDS = (scene.code, scene.title)
-VERSION_FIELDS = (
+VERSION_METADATA_FIELDS = (
     version.version,
     version.coordinate_profile,
     version.translation_unit,
     version.angle_unit,
-    version.origin_description,
     version.created_at,
 )
+VERSION_FIELDS = (*VERSION_METADATA_FIELDS, version.origin_description)
 VERSION_ORDER = (version.created_at.desc(), version.version.desc())
 PUBLISHED_SCENE = scene.review_state == "published"
 PUBLISHED_SCENE_VERSION = version.publication_state == "published"
@@ -131,12 +131,22 @@ def list_versions(
     )
 
 
-def get_version(connection: Connection, code: str, identifier: str) -> RowMapping | None:
+def get_version(
+    connection: Connection, code: str, identifier: str, *, origin_byte_limit: int | None = None
+) -> RowMapping | None:
+    origin = version.origin_description
+    if origin_byte_limit is not None:
+        # The stored origin is non-null. A null projection signals an oversized
+        # origin without copying the value to the database client.
+        origin = case(
+            (func.octet_length(origin) <= origin_byte_limit, origin)
+        ).label("origin_description")
     query = (
         select(
             version.id,
             *SCENE_FIELDS,
-            *VERSION_FIELDS,
+            *VERSION_METADATA_FIELDS,
+            origin,
             case(
                 (~ASSETS_AVAILABLE, "assets"),
                 (~ANNOTATIONS_AVAILABLE, "anatomy"),

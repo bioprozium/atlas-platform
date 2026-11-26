@@ -6,10 +6,10 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from threading import BoundedSemaphore
+from threading import BoundedSemaphore, Lock
 from typing import BinaryIO
 
-from anyio import CancelScope, to_thread
+from anyio import CancelScope, fail_after, to_thread
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.types import Receive, Scope, Send
 
@@ -135,23 +135,44 @@ class AssetFileResponse(Response):
         obj: StoredObject,
         slots: BoundedSemaphore,
         if_none_match: str | None,
+        *,
+        send_timeout: float,
     ) -> None:
         super().__init__()
         self.root = root
         self.obj = obj
         self.slots = slots
         self.if_none_match = if_none_match
+        self.send_timeout = send_timeout
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if not self.slots.acquire(blocking=False):
             await self._unavailable(DELIVERY_BUSY, scope, receive, send)
             return
         stack = ExitStack()
+        verification_lock = Lock()
+        closing = False
+
+        def verify() -> BinaryIO:
+            with verification_lock:
+                if closing:
+                    raise OSError("Asset delivery cancelled before verification.")
+                return open_verified(stack, self.root, self.obj)
+
+        def close() -> None:
+            # An ASGI task can be cancelled while verification is still running
+            # in a worker thread. Finish that handoff before closing the stack.
+            nonlocal closing
+            with verification_lock:
+                closing = True
+                stack.close()
+
         try:
             try:
-                file = await to_thread.run_sync(open_verified, stack, self.root, self.obj)
+                file = await to_thread.run_sync(verify)
             except (OSError, GLBValidationError):
-                await self._unavailable(STORAGE_UNAVAILABLE, scope, receive, send)
+                with fail_after(self.send_timeout):
+                    await self._unavailable(STORAGE_UNAVAILABLE, scope, receive, send)
                 return
 
             headers = cache_headers(self.obj.sha256)
@@ -162,11 +183,14 @@ class AssetFileResponse(Response):
                 response = StreamingResponse(
                     file_chunks(file, self.obj.file_size), media_type=GLB_MIME, headers=headers
                 )
-            await response(scope, receive, send)
+            # Let a timeout escape to the ASGI server so it aborts the transport
+            # if headers were sent. A second status or final body would be invalid.
+            with fail_after(self.send_timeout):
+                await response(scope, receive, send)
         finally:
             try:
                 with CancelScope(shield=True):
-                    await to_thread.run_sync(stack.close)
+                    await to_thread.run_sync(close)
             finally:
                 self.slots.release()
 

@@ -124,7 +124,7 @@ def _anatomy(connection: Connection, node_ids: list[UUID]) -> list[StructureSumm
 def build_manifest(
     connection: Connection, scene: RowMapping, settings: DeliverySettings
 ) -> tuple[bytes, list[StoredObject]]:
-    if len(scene.origin_description.encode("utf-8")) > settings.max_manifest_bytes:
+    if scene.origin_description is None:
         raise HTTPException(503, SIZE_LIMIT)
     query = queries.nodes_query(scene.id).limit(settings.max_nodes + 1)
     rows = connection.execute(query).mappings().all()

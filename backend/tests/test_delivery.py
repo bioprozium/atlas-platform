@@ -1,9 +1,10 @@
 """Path, descriptor ownership, and resource tests for GLB delivery."""
 
+import asyncio
 import os
 from hashlib import sha256
 from struct import pack
-from threading import BoundedSemaphore
+from threading import BoundedSemaphore, Event
 
 import anyio
 import pytest
@@ -108,17 +109,97 @@ def test_stream_uses_verified_descriptor_and_releases_resources(stored, monkeypa
             async def capture(part):
                 other.append(part)
 
-            await delivery.AssetFileResponse(root, obj, slots, None)(scope, receive, capture)
+            await delivery.AssetFileResponse(
+                root, obj, slots, None, send_timeout=3
+            )(scope, receive, capture)
             assert other[0]["status"] == 503
             first_body.set()
             if disconnect:
                 await anyio.sleep_forever()
 
-        await delivery.AssetFileResponse(root, obj, slots, None)(scope, receive, send)
+        await delivery.AssetFileResponse(
+            root, obj, slots, None, send_timeout=3
+        )(scope, receive, send)
         assert responses[0]["status"] == 200
         blocks = [message["body"] for message in responses if "body" in message]
         assert max(map(len, blocks)) <= BLOCK_SIZE
         assert b"".join(blocks) == (data[:BLOCK_SIZE] if disconnect else data)
+        assert opened[0].closed
+        assert slots.acquire(blocking=False)
+        slots.release()
+
+    anyio.run(exchange)
+
+
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+def test_stalled_send_aborts_incomplete_transfer(stored, monkeypatch, spec_version):
+    root, obj, _, _ = stored
+    slots = BoundedSemaphore(1)
+    opened = []
+    verify = delivery.open_verified
+
+    def record_file(*args):
+        file = verify(*args)
+        opened.append(file)
+        return file
+
+    monkeypatch.setattr(delivery, "open_verified", record_file)
+
+    async def exchange():
+        messages = []
+        scope = {"type": "http", "asgi": {"spec_version": spec_version}}
+
+        async def send(message):
+            messages.append(message)
+            if message["type"] == "http.response.body":
+                await anyio.sleep_forever()
+
+        response = delivery.AssetFileResponse(root, obj, slots, None, send_timeout=0.1)
+        with anyio.fail_after(3), pytest.raises(TimeoutError):
+            await response(scope, anyio.sleep_forever, send)
+        assert [message["type"] for message in messages] == [
+            "http.response.start", "http.response.body",
+        ]
+        assert messages[0]["status"] == 200
+        assert messages[1]["more_body"]
+        assert opened[0].closed
+        assert slots.acquire(blocking=False)
+        slots.release()
+
+    anyio.run(exchange)
+
+
+def test_asgi_task_cancelled_during_verification_closes_descriptor(stored, monkeypatch):
+    root, obj, _, _ = stored
+    slots = BoundedSemaphore(1)
+    started = Event()
+    finish = Event()
+    opened = []
+    verify = delivery.open_verified
+
+    def delayed_verification(*args):
+        started.set()
+        assert finish.wait(3)
+        file = verify(*args)
+        opened.append(file)
+        return file
+
+    monkeypatch.setattr(delivery, "open_verified", delayed_verification)
+
+    async def exchange():
+        async def send(message):
+            pytest.fail("Cancelled verification must not send a response.")
+
+        response = delivery.AssetFileResponse(root, obj, slots, None, send_timeout=3)
+        task = asyncio.create_task(response({"type": "http"}, anyio.sleep_forever, send))
+        try:
+            assert await anyio.to_thread.run_sync(started.wait, 3)
+            task.cancel()
+            await anyio.sleep(0)
+        finally:
+            finish.set()
+        with anyio.fail_after(3), pytest.raises(asyncio.CancelledError):
+            await task
         assert opened[0].closed
         assert slots.acquire(blocking=False)
         slots.release()

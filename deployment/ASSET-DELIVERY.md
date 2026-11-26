@@ -43,8 +43,8 @@ Adapt this example to the existing TLS virtual host and certificates. Keep the G
         CacheDisable /api/v1/
     </IfModule>
 
-    ProxyPass        "/api/v1/" "http://127.0.0.1:8000/api/v1/" connectiontimeout=5 timeout=120
-    ProxyPassReverse "/api/v1/" "http://127.0.0.1:8000/api/v1/"
+    ProxyPass        "/api/v1/" "http://127.0.0.1:8100/api/v1/" connectiontimeout=5 timeout=120
+    ProxyPassReverse "/api/v1/" "http://127.0.0.1:8100/api/v1/"
 </VirtualHost>
 ```
 

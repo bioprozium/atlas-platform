@@ -19,6 +19,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = DeliverySettings.from_environment()
     app.state.delivery_settings = settings
     app.state.delivery_slots = BoundedSemaphore(settings.file_slots)
+    app.state.manifest_slots = BoundedSemaphore(settings.manifest_slots)
     url = read_database_url(RUNTIME_DATABASE_ENV, RUNTIME_ROLE)
     engine = create_runtime_engine(url) if url is not None else None
     app.state.database_engine = engine
