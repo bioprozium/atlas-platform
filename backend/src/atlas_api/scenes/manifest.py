@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import Connection, RowMapping, distinct, func, select
+from sqlalchemy import Connection, RowMapping, func, select
 
 from atlas_api.anatomy.models import anatomical_structures
 from atlas_api.anatomy.queries import preferred_names_by_structure
@@ -42,9 +42,12 @@ def _assets(
     connection: Connection, scene_id: UUID, limit: int, byte_limit: int
 ) -> tuple[list[ManifestAsset], list[StoredObject]]:
     node = queries.node
-    pins = select(distinct(node.asset_version_id)).where(
-        node.scene_version_id == scene_id, node.asset_version_id.is_not(None)
-    ).limit(limit + 1)
+    pins = (
+        select(node.asset_version_id)
+        .distinct()
+        .where(node.scene_version_id == scene_id, node.asset_version_id.is_not(None))
+        .limit(limit + 1)
+    )
     ids = list(connection.scalars(pins))
     if len(ids) > limit:
         raise HTTPException(503, ASSET_LIMIT)

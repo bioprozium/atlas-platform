@@ -26,6 +26,7 @@ from atlas_api.config import (
     RUNTIME_ROLE,
 )
 from atlas_api.main import create_app
+from atlas_api.scenes import queries
 from atlas_api.scenes.models import scene_node_anatomy_links, scene_nodes, scene_versions, scenes
 
 pytestmark = pytest.mark.integration
@@ -1112,3 +1113,29 @@ def test_manifest_limits(
     assert response.status_code == 503
     assert response.headers["cache-control"] == "no-store"
     assert response.json() == {"detail": message}
+
+
+def test_manifest_build_uses_one_snapshot(delivery_root, client, scene_engine, monkeypatch):
+    original = queries.get_version
+    pin = asset_versions.update().where(asset_versions.c.id == PIN_V1)
+
+    def withdraw_after_scene_read(*args):
+        scene = original(*args)
+        with scene_engine.begin() as connection:
+            set_owner(connection)
+            connection.execute(pin.values(publication_state="withdrawn"))
+        return scene
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(queries, "get_version", withdraw_after_scene_read)
+            response = client.get(MANIFEST)
+        assert response.status_code == 200
+        assert response.json()["assets"][0]["version"] == "v1"
+        later = client.get(MANIFEST)
+        assert later.status_code == 503
+        assert later.json() == {"detail": "Scene asset versions unavailable."}
+    finally:
+        with scene_engine.begin() as connection:
+            set_owner(connection)
+            connection.execute(pin.values(publication_state="published"))

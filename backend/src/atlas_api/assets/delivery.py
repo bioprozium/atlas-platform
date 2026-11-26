@@ -25,8 +25,10 @@ from atlas_api.assets.validation import (
 GLB_MIME = "model/gltf-binary"
 STORAGE_UNAVAILABLE = "Published asset storage unavailable."
 DELIVERY_BUSY = "Asset delivery capacity unavailable."
-_ENTITY_TAG = r'(?:W/)?"[\x21\x23-\x7e\x80-\xff]*"'
-_TAG_LIST = re.compile(rf"(?:[ \t]*(?:{_ENTITY_TAG})?[ \t]*,)*[ \t]*(?:{_ENTITY_TAG})?[ \t]*")
+_ETAG_TOKEN = re.compile(
+    r'(?P<tag>(?:W/)?"[\x21\x23-\x7e\x80-\xff]*")|(?P<comma>,)|[ \t]+|(?P<invalid>.)',
+    re.DOTALL,
+)
 
 
 @dataclass(frozen=True)
@@ -49,12 +51,19 @@ def matches_etag(if_none_match: str | None, etag: str) -> bool:
         return False
     if if_none_match.strip(" \t") == "*":
         return True
-    if _TAG_LIST.fullmatch(if_none_match) is None:
-        return False
-    return any(
-        match.group().removeprefix("W/") == etag
-        for match in re.finditer(_ENTITY_TAG, if_none_match)
-    )
+    can_read_tag = True
+    matched = False
+    for token in _ETAG_TOKEN.finditer(if_none_match):
+        if token.lastgroup == "invalid":
+            return False
+        if token.lastgroup == "comma":
+            can_read_tag = True
+        elif tag := token.group("tag"):
+            if not can_read_tag:
+                return False
+            can_read_tag = False
+            matched |= tag.removeprefix("W/") == etag
+    return matched
 
 
 @contextmanager

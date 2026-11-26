@@ -10,14 +10,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "24"
       - name: Install local test tools
@@ -32,13 +32,15 @@ jobs:
       - name: Lint
         run: |
           git diff --check 56fe8af HEAD
-          ruff check backend processing
+          ruff check --isolated --select E4,E7,E9,F backend processing
           node --check processing/ingestion/validator.cjs
       - name: Build packages
+        if: ${{ !cancelled() }}
         run: |
           python -m build --outdir "$RUNNER_TEMP/atlas-dist" backend
           npm pack ./processing/ingestion --dry-run
       - name: Check OpenAPI contract
+        if: ${{ !cancelled() }}
         run: |
           python -c 'import json; from atlas_api.main import app; contract = app.openapi(); assert len(contract["paths"]) == 17; print(json.dumps(contract, indent=2, sort_keys=True))' > "$RUNNER_TEMP/openapi.v1.json"
           diff -u contracts/openapi.v1.json "$RUNNER_TEMP/openapi.v1.json"
@@ -50,3 +52,71 @@ jobs:
       - name: Run processing suite
         if: ${{ !cancelled() }}
         run: python -m pytest -c backend/pyproject.toml processing/tests
+      - name: Verify Linux delivery and quarantine access
+        if: ${{ !cancelled() }}
+        run: |
+          sudo python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+
+          ingest_uid, api_uid, deploy_uid, delivery_gid = 65101, 65102, 65103, 65201
+          digest = "ab" + "0" * 62
+
+          def mode(path, bits):
+              os.chown(path, ingest_uid, delivery_gid)
+              path.chmod(bits)
+
+          def denied(action):
+              try:
+                  action()
+              except PermissionError:
+                  return
+              raise AssertionError("Kernel unexpectedly allowed access")
+
+          def check_identity(uid, groups, check):
+              child = os.fork()
+              if child == 0:
+                  try:
+                      os.setgroups(groups)
+                      os.setgid(uid)
+                      os.setuid(uid)
+                      check()
+                  except Exception:
+                      import traceback
+                      traceback.print_exc()
+                      os._exit(1)
+                  os._exit(0)
+              assert os.waitpid(child, 0)[1] == 0
+
+          with TemporaryDirectory(prefix="atlas-permissions-") as tmp:
+              Path(tmp).chmod(0o755)
+              root = Path(tmp, "assets")
+              leaf = root / "sha256" / digest[:2]
+              leaf.mkdir(parents=True)
+              for directory in (root, leaf.parent, leaf):
+                  mode(directory, 0o2750)
+              obj = leaf / (digest + ".glb")
+              obj.write_bytes(b"object")
+              mode(obj, 0o440)
+              quarantine = root / ".quarantine"
+              quarantine.mkdir()
+              mode(quarantine, 0o700)
+              staged = quarantine / "staged.glb"
+              staged.write_bytes(b"private")
+              mode(staged, 0o440)
+
+              def api():
+                  assert obj.read_bytes() == b"object"
+                  denied(lambda: obj.open("wb"))
+                  denied(lambda: obj.unlink())
+                  denied(lambda: (leaf / "added").touch())
+                  denied(lambda: staged.read_bytes())
+
+              check_identity(api_uid, [delivery_gid], api)
+              check_identity(deploy_uid, [], lambda: denied(obj.read_bytes))
+              check_identity(ingest_uid, [delivery_gid], lambda: (
+                  (leaf / "writable-by-ingest").touch(), staged.read_bytes()
+              ))
+          print("Verified group read, API write denial, deployment denial, and quarantine isolation.")
+          PY

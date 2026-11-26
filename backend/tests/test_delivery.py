@@ -124,3 +124,21 @@ def test_stream_uses_verified_descriptor_and_releases_resources(stored, monkeypa
         slots.release()
 
     anyio.run(exchange)
+
+
+@pytest.mark.parametrize(
+    ("header", "matches"),
+    [
+        (None, False),
+        ("*", True),
+        ('W/"digest"', True),
+        ('"other,tag", W/"digest"', True),
+        (', "digest", ,', True),
+        ('"other" "digest"', False),
+        ('"digest", invalid', False),
+        ('"other, W/digest"', False),
+        ("  , " * 1000 + "bogus", False),
+    ],
+)
+def test_if_none_match_parses_tag_lists_without_accepting_malformed_values(header, matches):
+    assert delivery.matches_etag(header, '"digest"') is matches
