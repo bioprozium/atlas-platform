@@ -1,6 +1,207 @@
 {
   "components": {
     "schemas": {
+      "AssetDetail": {
+        "properties": {
+          "code": {
+            "description": "Stable public asset code.",
+            "title": "Code",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "versions": {
+            "$ref": "#/components/schemas/Page_AssetVersion_"
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "versions"
+        ],
+        "title": "AssetDetail",
+        "type": "object"
+      },
+      "AssetSource": {
+        "properties": {
+          "attribution": {
+            "title": "Attribution",
+            "type": "string"
+          },
+          "creator": {
+            "title": "Creator",
+            "type": "string"
+          },
+          "license_reference": {
+            "description": "License URL or public permission reference.",
+            "title": "License Reference",
+            "type": "string"
+          },
+          "modifications": {
+            "title": "Modifications",
+            "type": "string"
+          },
+          "rights_holder": {
+            "title": "Rights Holder",
+            "type": "string"
+          },
+          "source_reference": {
+            "description": "Original source URL or citation.",
+            "title": "Source Reference",
+            "type": "string"
+          },
+          "spdx_license_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spdx License Id"
+          }
+        },
+        "required": [
+          "creator",
+          "rights_holder",
+          "source_reference",
+          "spdx_license_id",
+          "license_reference",
+          "attribution",
+          "modifications"
+        ],
+        "title": "AssetSource",
+        "type": "object"
+      },
+      "AssetSummary": {
+        "properties": {
+          "code": {
+            "description": "Stable public asset code.",
+            "title": "Code",
+            "type": "string"
+          },
+          "latest_version": {
+            "$ref": "#/components/schemas/AssetVersion"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "latest_version"
+        ],
+        "title": "AssetSummary",
+        "type": "object"
+      },
+      "AssetVersion": {
+        "properties": {
+          "file_size": {
+            "description": "Size of the GLB in bytes.",
+            "title": "File Size",
+            "type": "integer"
+          },
+          "format": {
+            "const": "glb",
+            "title": "Format",
+            "type": "string"
+          },
+          "mime_type": {
+            "const": "model/gltf-binary",
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Lowercase hexadecimal digest of the GLB bytes.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/AssetSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "version": {
+            "description": "Immutable version identifier within the asset.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "sha256",
+          "file_size",
+          "format",
+          "mime_type",
+          "sources"
+        ],
+        "title": "AssetVersion",
+        "type": "object"
+      },
+      "AssetVersionDetail": {
+        "properties": {
+          "code": {
+            "description": "Stable public asset code.",
+            "title": "Code",
+            "type": "string"
+          },
+          "file_size": {
+            "description": "Size of the GLB in bytes.",
+            "title": "File Size",
+            "type": "integer"
+          },
+          "format": {
+            "const": "glb",
+            "title": "Format",
+            "type": "string"
+          },
+          "mime_type": {
+            "const": "model/gltf-binary",
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Lowercase hexadecimal digest of the GLB bytes.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/AssetSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "description": "Immutable version identifier within the asset.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "sha256",
+          "file_size",
+          "format",
+          "mime_type",
+          "sources",
+          "code",
+          "title"
+        ],
+        "title": "AssetVersionDetail",
+        "type": "object"
+      },
       "Direction": {
         "enum": [
           "incoming",
@@ -115,6 +316,102 @@
           "status"
         ],
         "title": "NotReadyResponse",
+        "type": "object"
+      },
+      "Page_AssetSummary_": {
+        "properties": {
+          "has_more": {
+            "description": "Whether more matching items followed this page.",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssetSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "Page[AssetSummary]",
+        "type": "object"
+      },
+      "Page_AssetVersion_": {
+        "properties": {
+          "has_more": {
+            "description": "Whether more matching items followed this page.",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssetVersion"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "Page[AssetVersion]",
+        "type": "object"
+      },
+      "Page_StructureAsset_": {
+        "properties": {
+          "has_more": {
+            "description": "Whether more matching items followed this page.",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StructureAsset"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "Page[StructureAsset]",
         "type": "object"
       },
       "Page_StructureRelation_": {
@@ -234,6 +531,75 @@
         ],
         "title": "RelationType",
         "type": "string"
+      },
+      "StructureAsset": {
+        "properties": {
+          "code": {
+            "description": "Stable public asset code.",
+            "title": "Code",
+            "type": "string"
+          },
+          "file_size": {
+            "description": "Size of the GLB in bytes.",
+            "title": "File Size",
+            "type": "integer"
+          },
+          "format": {
+            "const": "glb",
+            "title": "Format",
+            "type": "string"
+          },
+          "mime_type": {
+            "const": "model/gltf-binary",
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "sha256": {
+            "description": "Lowercase hexadecimal digest of the GLB bytes.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/AssetSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "description": "Immutable version identifier within the asset.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "sha256",
+          "file_size",
+          "format",
+          "mime_type",
+          "sources",
+          "code",
+          "title",
+          "role"
+        ],
+        "title": "StructureAsset",
+        "type": "object"
       },
       "StructureDetail": {
         "properties": {
@@ -652,6 +1018,122 @@
         ]
       }
     },
+    "/api/v1/anatomy/structures/{code}/assets": {
+      "get": {
+        "description": "List eligible linked versions by asset code and newest version first.",
+        "operationId": "listAnatomicalStructureAssets",
+        "parameters": [
+          {
+            "description": "Stable public code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "description": "Stable public code.",
+              "maxLength": 80,
+              "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of items to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of items to return.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of matching items to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of matching items to skip.",
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Substring of the asset code or title.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "pattern": "^[^\\x00]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Substring of the asset code or title.",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_StructureAsset_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The published structure was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The asset registry database is unavailable."
+          }
+        },
+        "summary": "List Structure Assets",
+        "tags": [
+          "Assets"
+        ]
+      }
+    },
     "/api/v1/anatomy/structures/{code}/relations": {
       "get": {
         "description": "List direct relations between published structures in source, target, and type order.",
@@ -938,6 +1420,274 @@
         "summary": "Get System",
         "tags": [
           "Anatomy"
+        ]
+      }
+    },
+    "/api/v1/assets": {
+      "get": {
+        "description": "List published assets with their latest eligible version in asset code order.",
+        "operationId": "listAssets",
+        "parameters": [
+          {
+            "description": "Maximum number of items to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of items to return.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of matching items to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of matching items to skip.",
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Substring of the asset code or title.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "pattern": "^[^\\x00]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Substring of the asset code or title.",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_AssetSummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The asset registry database is unavailable."
+          }
+        },
+        "summary": "List Assets",
+        "tags": [
+          "Assets"
+        ]
+      }
+    },
+    "/api/v1/assets/{code}": {
+      "get": {
+        "description": "Retrieve a published asset with a page of its eligible versions, newest first.",
+        "operationId": "getAsset",
+        "parameters": [
+          {
+            "description": "Stable public code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "description": "Stable public code.",
+              "maxLength": 80,
+              "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of items to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of items to return.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of matching items to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of matching items to skip.",
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The published asset was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The asset registry database is unavailable."
+          }
+        },
+        "summary": "Get Asset",
+        "tags": [
+          "Assets"
+        ]
+      }
+    },
+    "/api/v1/assets/{code}/versions/{version}": {
+      "get": {
+        "description": "Retrieve a published asset version and its attribution.",
+        "operationId": "getAssetVersion",
+        "parameters": [
+          {
+            "description": "Stable public code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "description": "Stable public code.",
+              "maxLength": 80,
+              "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Immutable version identifier.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "Immutable version identifier.",
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$",
+              "title": "Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetVersionDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The published asset version was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The asset registry database is unavailable."
+          }
+        },
+        "summary": "Get Version",
+        "tags": [
+          "Assets"
         ]
       }
     },

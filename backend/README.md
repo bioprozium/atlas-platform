@@ -66,6 +66,31 @@ Before setting a structure's review state to `published`, verify the following d
 
 Scientific verification is an editorial requirement. The public API serves records according to the stored review state.
 
+## 3D Asset Registry
+
+| GET path relative to `/api/v1` | Response |
+| --- | --- |
+| `/assets` | Page of assets in code order, each with its newest eligible version. |
+| `/assets/{code}` | Asset metadata and a page of eligible versions in descending creation order, with ties sorted by descending version identifier. |
+| `/assets/{code}/versions/{version}` | Metadata and attribution for the specified eligible version. |
+| `/anatomy/structures/{code}/assets` | Page of eligible versions linked to a published structure, with each link's optional role. Items sort by asset code, then by version creation time and identifier as above. |
+
+An asset and its version both need published status for the API to return that version. The page format, default limit of 50, and maximum limit of 100 match the anatomy API. The asset and structure asset listings accept `q` for case-insensitive literal substring matching on asset code or title. A missing or ineligible detail returns 404. A published structure with no eligible links returns an empty page. Invalid parameters return 422. A database failure returns 503 with `{"detail":"Asset registry database unavailable."}`.
+
+Use the asset code and version identifier together as the public identifier. Asset codes follow the anatomy code convention. Version identifiers are lowercase ASCII alphanumeric tokens separated by dots, underscores, or hyphens, up to 80 characters. Treat them as opaque identifiers. Each version includes its SHA-256 digest, file size in bytes, format, MIME type, and source records. The API exposes metadata only. [OpenAPI v1](../contracts/openapi.v1.json)
+
+### Editorial publication
+
+1. Register the asset and file version as drafts. Generate the relative storage reference with `atlas_api.assets.validation.glb_storage_reference`. The storage root is `/srv/atlas/assets/`, and the layout is `sha256/<first-two-hex-digits>/<lowercase-digest>.glb`. Reuse an existing file only after verifying its digest and size. Keep the storage tree under trusted operator control and treat stored content as immutable.
+2. Record each original or third-party source against the specific version, including applicable dependencies and upstream notices. Record creator, rights holder, original URL or citation, SPDX identifier where applicable, license URL or public permission reference, attribution, and modifications. Record an explicit value such as `No modifications` when applicable. Use public citations in source records and keep local paths and confidential evidence in the internal review record. Verify redistribution, adaptation, and offline rights under the [asset licensing policy](../docs/ASSET-LICENSING.md).
+3. Run `atlas_api.assets.validation.validate_glb` against the final stored bytes, expected size, and digest before setting `validation_state` to `valid`. Verify scientific accuracy and inspect the glTF content and any external dependencies as part of editorial review. Use anatomy links to associate the reviewed version with each applicable structure. The same structure and version can be linked once.
+4. Through the controlled database workflow, set the primary source, record `rights_verified_at` and the internal `rights_review_reference`, then explicitly publish the version and asset. PostgreSQL requires valid status, a primary source belonging to the version, and a recorded rights review before a version can be marked published.
+5. Set a version to `withdrawn` to hide it while preserving its identity and file metadata. Source edits require the version to be unpublished and clear its recorded rights review. Reverify rights before publishing again. Any change to the GLB bytes requires a new version and content address.
+
+The validator checks the file type, safe path resolution, size, digest, and chunk framing in bounded reads. It does not parse glTF JSON, check meshes or textures, or resolve references. PostgreSQL enforces the recorded publication prerequisites. Authorized editors are responsible for the validity of those attestations and for keeping files immutable after validation. API reads trust the recorded state and do not reopen the file. HTTPS delivery, automated ingestion, and full glTF content validation are deferred. [Khronos glTF 2.0 specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#binary-gltf-layout)
+
+Revision `0003` adds the registry to the existing `atlas` schema under `atlas_owner`. Rolling back to `0002` drops registry tables and their contents. The P1.1 anatomy tables and data survive that rollback.
+
 ## Install locally
 
 From the repository root, create a virtual environment and install the backend and test dependencies.
@@ -123,7 +148,7 @@ From `backend/` with the virtual environment active, run unit tests without Post
 python -m pytest -m 'not integration'
 ```
 
-**Integration tests apply migrations to a disposable PostgreSQL 16 cluster created and removed by pytest.** The fixture uses a private Unix socket with TCP disabled and generates its own connection URLs. Put the PostgreSQL 16 server tools (`initdb`, `pg_ctl`, and `psql`) on `PATH` and run pytest as a regular user. The suite checks readiness, migration ownership and rollback, read-only runtime access, anatomy data constraints, and the public API using a small deterministic fixture.
+**Integration tests apply migrations to a disposable PostgreSQL 16 cluster created and removed by pytest.** The fixture uses a private Unix socket with TCP disabled and generates its own connection URLs. Put the PostgreSQL 16 server tools (`initdb`, `pg_ctl`, and `psql`) on `PATH` and run pytest as a regular user. The suite checks readiness, migration ownership and rollback, read-only runtime access, data constraints, and the public API using deterministic anatomy and synthetic GLB metadata fixtures.
 
 ```sh
 python -m pytest -m integration
