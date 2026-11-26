@@ -1,9 +1,12 @@
 """SQLAlchemy table definitions for the Human Anatomy domain."""
 
+from enum import StrEnum
+
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Enum,
     ForeignKey,
     Index,
     String,
@@ -18,6 +21,16 @@ from atlas_api.db import SCHEMA, metadata
 CODE_PATTERN = r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
 CODE_LENGTH = 80
 NAME_LENGTH = 255
+
+
+class StructureKind(StrEnum):
+    BONE = "bone"
+    ORGAN = "organ"
+    ORGAN_PART = "organ_part"
+    REGION = "region"
+    TISSUE = "tissue"
+    JOINT = "joint"
+    AGGREGATE = "aggregate"
 
 
 def uuid_primary_key() -> Column:
@@ -44,6 +57,17 @@ anatomical_structures = Table(
     metadata,
     uuid_primary_key(),
     Column("code", String(CODE_LENGTH), nullable=False),
+    Column(
+        "structure_kind",
+        Enum(
+            StructureKind,
+            values_callable=lambda kinds: [kind.value for kind in kinds],
+            native_enum=False,
+            create_constraint=True,
+            name="ck_anatomical_structures_kind",
+        ),
+        nullable=False,
+    ),
     Column("laterality", String(5), nullable=False),
     Column("review_state", String(9), nullable=False, server_default="draft"),
     UniqueConstraint("code", name="uq_anatomical_structures_code"),

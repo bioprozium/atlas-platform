@@ -5,7 +5,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from atlas_api.anatomy.models import CODE_LENGTH, CODE_PATTERN, NAME_LENGTH
+from atlas_api.anatomy.models import CODE_LENGTH, CODE_PATTERN, NAME_LENGTH, StructureKind
 
 SearchTerm = Annotated[str, Field(min_length=1, max_length=NAME_LENGTH, pattern=r"^[^\x00]+$")]
 
@@ -76,6 +76,7 @@ class System(BaseModel):
 
 class Structure(BaseModel):
     code: str
+    structure_kind: StructureKind = Field(description="Anatomical category of the structure.")
     laterality: Laterality = Field(description="Use none for non-lateral structures.")
 
 

@@ -79,9 +79,9 @@ def get_system(connection: Connection, code: str) -> System | None:
 
 
 def list_structures(connection: Connection, filters: StructureFilters) -> Page[StructureSummary]:
-    query = select(structures.id, structures.code, structures.laterality).where(
-        structures.review_state == "published"
-    )
+    query = select(
+        structures.id, structures.code, structures.structure_kind, structures.laterality
+    ).where(structures.review_state == "published")
     if filters.system_code is not None:
         membership = (
             select(1)
@@ -116,7 +116,10 @@ def list_structures(connection: Connection, filters: StructureFilters) -> Page[S
     return Page[StructureSummary](
         items=[
             StructureSummary(
-                code=row.code, laterality=row.laterality, preferred_names=preferred_names[row.id]
+                code=row.code,
+                structure_kind=row.structure_kind,
+                laterality=row.laterality,
+                preferred_names=preferred_names[row.id],
             )
             for row in rows
         ],
@@ -129,9 +132,9 @@ def list_structures(connection: Connection, filters: StructureFilters) -> Page[S
 def published_structure(connection: Connection, code: str) -> RowMapping | None:
     return (
         connection.execute(
-            select(structures.id, structures.code, structures.laterality).where(
-                structures.code == code, structures.review_state == "published"
-            )
+            select(
+                structures.id, structures.code, structures.structure_kind, structures.laterality
+            ).where(structures.code == code, structures.review_state == "published")
         )
         .mappings()
         .one_or_none()
@@ -164,6 +167,7 @@ def get_structure(connection: Connection, code: str) -> StructureDetail | None:
 
     return StructureDetail(
         code=structure.code,
+        structure_kind=structure.structure_kind,
         laterality=structure.laterality,
         names=[StructureName.model_validate(row) for row in name_rows],
         systems=[System.model_validate(row) for row in system_rows],

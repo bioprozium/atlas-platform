@@ -15,8 +15,8 @@ The endpoints under `/api/v1/anatomy` serve published anatomy content. Use the p
 | --- | --- |
 | `/systems` | Page of system codes and names. Use `q` to match a code or name. |
 | `/systems/{code}` | System code and name. |
-| `/structures` | Page of structure codes, laterality, and preferred names. Filter by `system_code`, `laterality` (`left`, `right`, `none`), `language` (`la`, `en`, `az`), or `q`. |
-| `/structures/{code}` | Structure code, laterality, preferred names and synonyms, published system memberships, and external identifiers with provenance. |
+| `/structures` | Page of structure codes, `structure_kind`, laterality, and preferred names. Filter by `system_code`, `laterality` (`left`, `right`, `none`), `language` (`la`, `en`, `az`), or `q`. |
+| `/structures/{code}` | Structure code, `structure_kind`, laterality, preferred names and synonyms, published system memberships, and external identifiers with provenance. |
 | `/structures/{code}/relations` | Page of direct relationships with `source_code`, `relation_type`, and `target_code`. Filter by `relation_type` (`part_of`, `is_a`) or `direction` (`incoming`, `outgoing`). The default includes both directions. |
 
 List responses contain `items`, `limit`, `offset`, and `has_more`. The default page size is 50, the maximum is 100, and the starting offset is 0. Systems and structures sort by code. Relations sort by source code, target code, and relation type. Advance `offset` by `limit` when `has_more` is true.
@@ -29,10 +29,42 @@ A missing or draft detail resource returns HTTP 404 with a JSON `detail` message
 
 Revision `0002` adds the anatomy tables to the existing `atlas` schema. Systems and structures start in the `draft` review state and become visible when marked `published`. The API also omits memberships in draft systems and relations with a draft endpoint. Revision `0002` initializes an internal hierarchy guard. Anatomy content is loaded separately, and the test fixture is confined to disposable databases. Downgrading to `0001` drops the anatomy tables and their contents.
 
-- Each system and structure has an internal UUID and an immutable public code. Codes are lowercase ASCII slugs of up to 80 characters. Preserve existing codes when names change and avoid reusing retired codes.
 - A structure can have one preferred name per language and multiple synonyms. Languages use `la` for Latin, `en` for English, and `az` for Azerbaijani. Use `none` for non-lateral structures and separate codes for paired left and right structures. A structure can belong to multiple systems.
 - A `part_of` edge points from the part to the whole. An `is_a` edge points from the subtype to the supertype. The database rejects self-edges, duplicate typed edges, and cycles across either or both edge types. Graph changes serialize through the guard row. Transactions at stricter isolation levels can receive a serialization failure and need a retry.
 - An external mapping records the namespace, identifier value, source, and source version when known. The same namespace and value can map to several atlas structures. Verify third-party terms and attribution before importing scientific content and use verified identifiers for external mappings. [Asset licensing policy](../docs/ASSET-LICENSING.md)
+
+### Structure kinds
+
+Each structure requires one `structure_kind`. Choose the most specific category for the structure being described. Use `is_a` relations to record its scientific taxonomy and system memberships to record which systems it belongs to.
+
+| Value | Use |
+| --- | --- |
+| `bone` | A named bone such as the left femur. |
+| `organ` | A whole organ such as the heart. |
+| `organ_part` | A distinct part of an organ such as the left ventricle. |
+| `region` | An anatomical region such as the thorax. |
+| `tissue` | A tissue such as bone marrow. |
+| `joint` | An articulation such as the knee joint. |
+| `aggregate` | A collection of anatomical structures such as the skeleton. |
+
+Adding a kind requires a schema migration and an update to the API vocabulary.
+
+### Public anatomy codes
+
+Each system and structure has an internal UUID and an immutable public code. Use a lowercase ASCII slug of up to 80 characters that starts with a letter and uses hyphens to separate alphanumeric tokens. Choose a code for the anatomical concept itself, such as `left-femur` or `heart`. Omit system membership, structure kind, and hierarchy paths from the code. Keep the code when a name, category, or hierarchy changes. Retired codes stay reserved.
+
+Use the same code verbatim in API URLs, Android records, 3D asset references, and offline manifests.
+
+### Minimum metadata for publication
+
+Before setting a structure's review state to `published`, verify the following during content review.
+
+- The public code identifies a distinct anatomical concept and follows the code convention. Its structure kind and laterality match the concept.
+- At least one preferred name is verified against a credible anatomy reference in a supported language. Verify any additional names and synonyms that will be published.
+- The material submitted for review includes a citation for the name and anatomical identity, with the source edition or version when available.
+- Any system memberships, relationships, or external mappings are checked for scientific accuracy. External mappings include a verified namespace and identifier, their source, and the source version when available.
+
+Scientific verification is an editorial requirement. The public API serves records according to the stored review state.
 
 ## Install locally
 

@@ -14,10 +14,15 @@ def upgrade() -> None:
         "anatomical_structures",
         sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
         sa.Column("code", sa.String(length=80), nullable=False),
+        sa.Column("structure_kind", sa.String(length=10), nullable=False),
         sa.Column("laterality", sa.String(length=5), nullable=False),
         sa.Column("review_state", sa.String(length=9), server_default="draft", nullable=False),
         sa.CheckConstraint(
             "code ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'", name="ck_anatomical_structures_code"
+        ),
+        sa.CheckConstraint(
+            "structure_kind IN ('bone', 'organ', 'organ_part', 'region', 'tissue', 'joint', 'aggregate')",
+            name="ck_anatomical_structures_kind",
         ),
         sa.CheckConstraint(
             "laterality IN ('left', 'right', 'none')", name="ck_structures_laterality"

@@ -259,6 +259,10 @@
             "title": "Names",
             "type": "array"
           },
+          "structure_kind": {
+            "$ref": "#/components/schemas/StructureKind",
+            "description": "Anatomical category of the structure."
+          },
           "systems": {
             "items": {
               "$ref": "#/components/schemas/System"
@@ -269,6 +273,7 @@
         },
         "required": [
           "code",
+          "structure_kind",
           "laterality",
           "names",
           "systems",
@@ -276,6 +281,19 @@
         ],
         "title": "StructureDetail",
         "type": "object"
+      },
+      "StructureKind": {
+        "enum": [
+          "bone",
+          "organ",
+          "organ_part",
+          "region",
+          "tissue",
+          "joint",
+          "aggregate"
+        ],
+        "title": "StructureKind",
+        "type": "string"
       },
       "StructureName": {
         "properties": {
@@ -339,10 +357,15 @@
             },
             "title": "Preferred Names",
             "type": "array"
+          },
+          "structure_kind": {
+            "$ref": "#/components/schemas/StructureKind",
+            "description": "Anatomical category of the structure."
           }
         },
         "required": [
           "code",
+          "structure_kind",
           "laterality",
           "preferred_names"
         ],

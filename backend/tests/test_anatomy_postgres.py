@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.pool import NullPool
 
 from atlas_api.anatomy.models import (
+    StructureKind,
     anatomical_structures,
     anatomical_systems,
     external_identifiers,
@@ -41,13 +42,13 @@ SYSTEMS = {
     "draft-system": "Draft system",
 }
 STRUCTURES = {
-    "bone-marrow": "none",
-    "femur": "none",
-    "heart": "none",
-    "left-femur": "left",
-    "right-femur": "right",
-    "skeleton": "none",
-    "draft-ventricle": "left",
+    "bone-marrow": ("tissue", "none"),
+    "femur": ("bone", "none"),
+    "heart": ("organ", "none"),
+    "left-femur": ("bone", "left"),
+    "right-femur": ("bone", "right"),
+    "skeleton": ("aggregate", "none"),
+    "draft-ventricle": ("organ_part", "left"),
 }
 SYSTEM_IDS = {code: UUID(int=index) for index, code in enumerate(SYSTEMS, start=1)}
 STRUCTURE_IDS = {code: UUID(int=index) for index, code in enumerate(STRUCTURES, start=11)}
@@ -96,10 +97,11 @@ def anatomy_engine(postgres_url):
                 {
                     "id": STRUCTURE_IDS[code],
                     "code": code,
+                    "structure_kind": kind,
                     "laterality": laterality,
                     "review_state": "draft" if code == "draft-ventricle" else "published",
                 }
-                for code, laterality in STRUCTURES.items()
+                for code, (kind, laterality) in STRUCTURES.items()
             ],
         )
         connection.execute(
@@ -118,6 +120,9 @@ def anatomy_engine(postgres_url):
                     ("left-femur", "az", "Sol bud sümüyü", True),
                     ("right-femur", "en", "Right femur", True),
                     ("heart", "en", "Heart", True),
+                    ("femur", "en", "Femur", True),
+                    ("bone-marrow", "en", "Bone marrow", True),
+                    ("skeleton", "en", "Skeleton", True),
                 ]
             ],
         )
@@ -181,13 +186,13 @@ def assert_constraint(connection, statement, sqlstate, constraint=None):
 def test_public_codes_review_and_laterality_constraints(owner):
     identifier, state = owner.execute(
         anatomical_structures.insert()
-        .values(code="sternum", laterality="none")
+        .values(code="sternum", structure_kind="bone", laterality="none")
         .returning(anatomical_structures.c.id, anatomical_structures.c.review_state)
     ).one()
     assert isinstance(identifier, UUID)
     assert state == "draft"
     for table, values in [
-        (anatomical_structures, {"code": "heart", "laterality": "none"}),
+        (anatomical_structures, {"code": "heart", "structure_kind": "organ", "laterality": "none"}),
         (anatomical_systems, {"code": "skeletal", "name": "Skeletal system"}),
     ]:
         assert_constraint(owner, table.insert().values(**values), "23505")
@@ -204,8 +209,31 @@ def test_public_codes_review_and_laterality_constraints(owner):
         )
 
     assert_constraint(
-        owner, anatomical_structures.insert().values(code="new-code", laterality="both"), "23514"
+        owner,
+        anatomical_structures.insert().values(
+            code="new-code", structure_kind="bone", laterality="both"
+        ),
+        "23514",
+        "ck_structures_laterality",
     )
+
+
+def test_structure_kind_is_required_and_controlled(owner):
+    insertion = anatomical_structures.insert().values(code="new-structure", laterality="none")
+    assert_constraint(owner, insertion, "23502")
+    assert_constraint(
+        owner,
+        insertion.values(structure_kind="invented"),
+        "23514",
+        "ck_anatomical_structures_kind",
+    )
+    for kind in StructureKind:
+        stored = owner.scalar(
+            insertion.values(
+                code=f"test-{kind.value.replace('_', '-')}", structure_kind=kind
+            ).returning(anatomical_structures.c.structure_kind)
+        )
+        assert stored == kind
 
 
 def test_names_memberships_and_identifier_constraints(owner):
@@ -366,9 +394,16 @@ def test_system_list_detail_filters_and_pagination(client):
 def test_structure_list_filters_and_pagination(client):
     page = read(client, "/structures", {"limit": 2})
     assert codes(page) == ["bone-marrow", "femur"]
+    assert [item["structure_kind"] for item in page["items"]] == ["tissue", "bone"]
     assert page["has_more"] is True
     page = read(client, "/structures", {"offset": 2})
     assert codes(page) == ["heart", "left-femur", "right-femur", "skeleton"]
+    assert [item["structure_kind"] for item in page["items"]] == [
+        "organ",
+        "bone",
+        "bone",
+        "aggregate",
+    ]
     assert page["has_more"] is False
     assert {name["language"] for name in page["items"][1]["preferred_names"]} == {"la", "en", "az"}
     assert all(name["is_preferred"] for name in page["items"][1]["preferred_names"])
@@ -391,6 +426,7 @@ def test_structure_detail_names_memberships_and_identifier_provenance(client):
     femur = read(client, "/structures/left-femur")
     assert femur == {
         "code": "left-femur",
+        "structure_kind": "bone",
         "laterality": "left",
         "names": [
             {"language": "az", "name": "Sol bud sümüyü", "is_preferred": True},
@@ -406,9 +442,9 @@ def test_structure_detail_names_memberships_and_identifier_provenance(client):
         "hematopoietic",
         "skeletal",
     ]
-    assert read(client, "/structures/heart")["systems"] == [
-        {"code": "cardiovascular", "name": "Cardiovascular system"}
-    ]
+    heart = read(client, "/structures/heart")
+    assert heart["structure_kind"] == "organ"
+    assert heart["systems"] == [{"code": "cardiovascular", "name": "Cardiovascular system"}]
 
 
 def test_relation_order_directions_filters_and_pagination(client):
