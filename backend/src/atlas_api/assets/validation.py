@@ -31,33 +31,50 @@ def glb_storage_reference(sha256: str) -> str:
 
 
 @contextmanager
-def _open_asset_file(root: Path, reference: str) -> Iterator[tuple[BinaryIO, int]]:
-    parts = reference.split("/")
-    if len(reference) > 255 or any(PATH_COMPONENT.fullmatch(part) is None for part in parts):
-        raise GLBValidationError("Invalid relative storage reference.")
-    if not root.is_absolute() or ".." in root.parts:
-        raise GLBValidationError("Expected an absolute storage root without parent components.")
-
+def open_directory(path: Path, *, trusted_ancestors: bool = False) -> Iterator[int]:
+    """Open an absolute directory without following a symlink in any component."""
+    if path.anchor != "/" or ".." in path.parts:
+        raise GLBValidationError(
+            "Expected an absolute directory without parent components."
+        )
     # Resolve every component relative to an open directory, with symlinks disabled.
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     directory_fd = os.open("/", directory_flags)
     try:
-        for part in (*root.parts[1:], *parts[:-1]):
+        # A user namespace can present the filesystem root owner under a mapped UID.
+        trusted_uids = {0, os.geteuid(), os.fstat(directory_fd).st_uid}
+        for part in path.parts[1:]:
+            if trusted_ancestors:
+                entry = os.fstat(directory_fd)
+                if entry.st_uid not in trusted_uids or (
+                    entry.st_mode & 0o022 and not entry.st_mode & stat.S_ISVTX
+                ):
+                    raise GLBValidationError(
+                        "Storage path has an unsafe ancestor directory."
+                    )
             child_fd = os.open(part, directory_flags, dir_fd=directory_fd)
             os.close(directory_fd)
             directory_fd = child_fd
-        fd = os.open(
-            parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd
-        )
+        yield directory_fd
     finally:
         os.close(directory_fd)
 
+
+@contextmanager
+def open_regular_file(directory_fd: int, name: str) -> Iterator[BinaryIO]:
+    if name in ("", ".", "..") or "/" in name:
+        raise GLBValidationError("Expected a single filename.")
+    entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    if stat.S_ISLNK(entry.st_mode):
+        raise OSError("Symlinks are not allowed.")
+    if not stat.S_ISREG(entry.st_mode):
+        raise GLBValidationError("The asset must be a regular file.")
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
     try:
-        file_stat = os.fstat(fd)
-        if not stat.S_ISREG(file_stat.st_mode):
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise GLBValidationError("The asset must be a regular file.")
         with open(fd, "rb", closefd=False) as file:
-            yield file, file_stat.st_size
+            yield file
     finally:
         os.close(fd)
 
@@ -69,19 +86,39 @@ def validate_glb(
 
     See Khronos glTF 2.0, Binary glTF Layout. Chunk payloads stay opaque.
     """
-    if re.fullmatch(SHA256_PATTERN, expected_sha256) is None:
-        raise GLBValidationError("Expected a lowercase hexadecimal SHA-256 digest.")
-    if not GLB_MIN_SIZE <= expected_size <= GLB_MAX_SIZE or expected_size % 4:
-        raise GLBValidationError("Expected file size is outside GLB 2.0 bounds or unaligned.")
-
+    parts = reference.split("/")
+    if len(reference) > 255 or any(
+        PATH_COMPONENT.fullmatch(part) is None for part in parts
+    ):
+        raise GLBValidationError("Invalid relative storage reference.")
     try:
-        with _open_asset_file(root, reference) as (file, actual_size):
-            if actual_size != expected_size:
-                raise GLBValidationError("Actual file size differs from the expected size.")
-            if _glb_sha256(file, actual_size) != expected_sha256:
-                raise GLBValidationError("SHA-256 digest does not match.")
+        with (
+            open_directory(root.joinpath(*parts[:-1])) as directory,
+            open_regular_file(directory, parts[-1]) as file,
+        ):
+            validate_glb_file(
+                file, expected_size=expected_size, expected_sha256=expected_sha256
+            )
     except OSError:
-        raise GLBValidationError("Unable to open or read the asset file safely.") from None
+        raise GLBValidationError(
+            "Unable to open or read the asset file safely."
+        ) from None
+
+
+def validate_glb_file(
+    file: BinaryIO, *, expected_size: int, expected_sha256: str
+) -> None:
+    """Verify an already securely opened, regular GLB file."""
+    glb_storage_reference(expected_sha256)
+    if not GLB_MIN_SIZE <= expected_size <= GLB_MAX_SIZE or expected_size % 4:
+        raise GLBValidationError(
+            "Expected file size is outside GLB 2.0 bounds or unaligned."
+        )
+    if os.fstat(file.fileno()).st_size != expected_size:
+        raise GLBValidationError("Actual file size differs from the expected size.")
+    file.seek(0)
+    if _glb_sha256(file, expected_size) != expected_sha256:
+        raise GLBValidationError("SHA-256 digest does not match.")
 
 
 def _glb_sha256(file: BinaryIO, size: int) -> str:
@@ -108,10 +145,14 @@ def _glb_sha256(file: BinaryIO, size: int) -> str:
         length, kind = CHUNK_HEADER.unpack(read_exact(CHUNK_HEADER.size))
         remaining -= CHUNK_HEADER.size
         if length % 4 or length > remaining:
-            raise GLBValidationError("GLB chunk is unaligned or exceeds the container length.")
+            raise GLBValidationError(
+                "GLB chunk is unaligned or exceeds the container length."
+            )
         if chunk_index == 0 and (kind != b"JSON" or length == 0):
             raise GLBValidationError("The first GLB chunk must contain JSON.")
-        if (kind == b"JSON" and chunk_index != 0) or (kind == b"BIN\x00" and chunk_index != 1):
+        if (kind == b"JSON" and chunk_index != 0) or (
+            kind == b"BIN\x00" and chunk_index != 1
+        ):
             raise GLBValidationError("Unexpected position or duplicate GLB chunk type.")
 
         remaining -= length
