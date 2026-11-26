@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import Connection, RowMapping, case, or_, select, true
+from sqlalchemy import Connection, RowMapping, Select, case, or_, select, true
 
 from atlas_api.anatomy.models import anatomical_structures
 from atlas_api.anatomy.queries import fetch_page
@@ -178,11 +178,9 @@ def anatomy_links_by_node(
     return grouped
 
 
-def list_nodes(
-    connection: Connection, scene_version: RowMapping, filters: Pagination
-) -> SceneNodesPage:
+def nodes_query(scene_version_id: UUID) -> Select:
     parent = scene_nodes.alias("parent")
-    query = (
+    return (
         select(
             node.id,
             node.code,
@@ -200,28 +198,37 @@ def list_nodes(
             .outerjoin(asset_versions, node.asset_version_id == asset_version.id)
             .outerjoin(assets, asset_version.asset_id == asset.id)
         )
-        .where(node.scene_version_id == scene_version.id)
+        .where(node.scene_version_id == scene_version_id)
         .order_by(node.sort_order, node.code)
     )
-    rows, has_more = fetch_page(connection, query, filters)
+
+
+def build_nodes(connection: Connection, rows: Sequence[RowMapping]) -> list[SceneNode]:
     links = anatomy_links_by_node(connection, rows)
+    return [
+        SceneNode(
+            code=row.code,
+            parent_code=row.parent_code,
+            node_type=row.node_type,
+            sort_order=row.sort_order,
+            transform=LocalTransform.model_validate(row),
+            asset=SceneAssetReference(code=row.asset_code, version=row.asset_version)
+            if row.asset_code is not None
+            else None,
+            anatomy_links=links[row.id],
+        )
+        for row in rows
+    ]
+
+
+def list_nodes(
+    connection: Connection, scene_version: RowMapping, filters: Pagination
+) -> SceneNodesPage:
+    rows, has_more = fetch_page(connection, nodes_query(scene_version.id), filters)
     return SceneNodesPage(
         scene_code=scene_version.code,
         version=scene_version.version,
-        items=[
-            SceneNode(
-                code=row.code,
-                parent_code=row.parent_code,
-                node_type=row.node_type,
-                sort_order=row.sort_order,
-                transform=LocalTransform.model_validate(row),
-                asset=SceneAssetReference(code=row.asset_code, version=row.asset_version)
-                if row.asset_code is not None
-                else None,
-                anatomy_links=links[row.id],
-            )
-            for row in rows
-        ],
+        items=build_nodes(connection, rows),
         limit=filters.limit,
         offset=filters.offset,
         has_more=has_more,

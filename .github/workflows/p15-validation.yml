@@ -1,0 +1,52 @@
+name: P1.5 disposable validation
+on:
+  pull_request:
+    branches: [develop]
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install local test tools
+        run: |
+          if [[ ! -x /usr/lib/postgresql/16/bin/initdb ]]; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-16
+          fi
+          echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
+          python -m pip install -e 'backend[test]' build ruff
+          npm --prefix processing/ingestion ci --ignore-scripts --no-audit --no-fund
+      - name: Lint
+        run: |
+          git diff --check 56fe8af HEAD
+          ruff check backend processing
+          node --check processing/ingestion/validator.cjs
+      - name: Build packages
+        run: |
+          python -m build --outdir "$RUNNER_TEMP/atlas-dist" backend
+          npm pack ./processing/ingestion --dry-run
+      - name: Check OpenAPI contract
+        run: |
+          python -c 'import json; from atlas_api.main import app; contract = app.openapi(); assert len(contract["paths"]) == 17; print(json.dumps(contract, indent=2, sort_keys=True))' > "$RUNNER_TEMP/openapi.v1.json"
+          diff -u contracts/openapi.v1.json "$RUNNER_TEMP/openapi.v1.json"
+      - name: Run backend suite on disposable PostgreSQL 16
+        if: ${{ !cancelled() }}
+        run: |
+          pg_ctl --version
+          python -m pytest -c backend/pyproject.toml backend/tests
+      - name: Run processing suite
+        if: ${{ !cancelled() }}
+        run: python -m pytest -c backend/pyproject.toml processing/tests

@@ -72,4 +72,6 @@ Pages use `limit` (default 50, maximum 100) and `offset` (default 0) and return 
 
 Every mapped structure is a required dependency. If an asset pin becomes ineligible or a mapped structure goes back to draft, discovery omits the entire version. The exact version and every node page return HTTP 503, including pages with no affected nodes. The response detail is `Scene asset versions unavailable.` for an ineligible asset pin and `Scene anatomy annotations unavailable.` for an unpublished structure when all asset pins are eligible. Scene detail returns HTTP 503 when it has published versions but none are eligible. If at least one of those versions has eligible asset pins, that response identifies the anatomy dependency. Republish the structure to restore the same saved annotations for any scene version that is still published and eligible.
 
+Use the [scene manifest](SCENE-MANIFEST.md) to retrieve the complete offline scene and its exact asset URLs in one request.
+
 Revision `0004` adds the scene tables to the `atlas` schema under `atlas_owner`. Downgrading to `0003` removes the scene tables and their data and preserves existing anatomy and asset records.

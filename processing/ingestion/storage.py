@@ -1,5 +1,6 @@
 """Private staging and durable, no-clobber content-addressed storage."""
 
+import grp
 import os
 import stat
 from collections.abc import Iterator
@@ -23,24 +24,60 @@ from .validation import IngestionError, Limits, verify_container
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 
-def check_directory(directory: int, *, private: bool = False) -> None:
+def delivery_group(root: int, name: str | None) -> int | None:
+    if name is None:
+        entry = os.fstat(root)
+        if not entry.st_mode & stat.S_ISGID:
+            return None
+        try:
+            if grp.getgrgid(entry.st_gid).gr_name != "atlasdelivery":
+                return None
+        except KeyError:
+            return None
+        name = "atlasdelivery"
+    try:
+        gid = grp.getgrnam(name).gr_gid
+    except KeyError:
+        raise IngestionError("DELIVERY_GROUP", "The delivery group does not exist.") from None
+    if gid not in {*os.getgroups(), os.getegid()}:
+        raise IngestionError("DELIVERY_GROUP", "The importer must belong to the delivery group.")
+    return gid
+
+
+def check_directory(
+    directory: int, *, private: bool = False, delivery_gid: int | None = None
+) -> None:
     entry = os.fstat(directory)
     forbidden = 0o077 if private else 0o022
     if entry.st_uid != os.geteuid() or entry.st_mode & forbidden:
         raise IngestionError(
             "UNSAFE_STORAGE", "Storage directory ownership or mode is unsafe."
         )
+    if delivery_gid is not None and (
+        entry.st_gid != delivery_gid or stat.S_IMODE(entry.st_mode) != 0o2750
+    ):
+        raise IngestionError(
+            "UNSAFE_STORAGE", "Delivery directories require the configured group and mode 2750."
+        )
 
 
 @contextmanager
-def subdirectory(parent: int, name: str, *, private: bool = False) -> Iterator[int]:
+def subdirectory(
+    parent: int, name: str, *, private: bool = False, delivery_gid: int | None = None
+) -> Iterator[int]:
+    created = False
     try:
         os.mkdir(name, mode=0o700 if private else 0o750, dir_fd=parent)
+        created = True
     except FileExistsError:
         pass
     fd = os.open(name, DIRECTORY_FLAGS, dir_fd=parent)
     try:
-        check_directory(fd, private=private)
+        if created and delivery_gid is not None:
+            os.fchown(fd, -1, delivery_gid)
+            os.fchmod(fd, 0o2750)
+            os.fsync(fd)
+        check_directory(fd, private=private, delivery_gid=delivery_gid)
         os.fsync(parent)
         yield fd
     finally:
@@ -118,14 +155,21 @@ def stage(root: int, path: Path, limits: Limits) -> Iterator[StagedAsset]:
             os.fsync(quarantine)
 
 
-def promote(root: int, asset: StagedAsset, limits: Limits) -> bool:
+def promote(
+    root: int, asset: StagedAsset, limits: Limits, *, delivery_gid: int | None = None
+) -> bool:
     """Link validated bytes into place and verify and sync the final object."""
     prefix, bucket, name = asset.reference.split("/")
     try:
         with (
-            subdirectory(root, prefix) as objects,
-            subdirectory(objects, bucket) as leaf,
+            subdirectory(root, prefix, delivery_gid=delivery_gid) as objects,
+            subdirectory(objects, bucket, delivery_gid=delivery_gid) as leaf,
         ):
+            if delivery_gid is not None:
+                # The staging inode is still reachable only through private quarantine.
+                os.fchown(asset.file.fileno(), -1, delivery_gid)
+                os.fchmod(asset.file.fileno(), 0o440)
+                os.fsync(asset.file.fileno())
             created = True
             try:
                 os.link(
@@ -145,6 +189,13 @@ def promote(root: int, asset: StagedAsset, limits: Limits) -> bool:
                     raise IngestionError(
                         "UNSAFE_DESTINATION",
                         "Stored object ownership or mode is unsafe.",
+                    )
+                if delivery_gid is not None and (
+                    entry.st_gid != delivery_gid or stat.S_IMODE(entry.st_mode) != 0o440
+                ):
+                    raise IngestionError(
+                        "UNSAFE_DESTINATION",
+                        "Stored object requires the configured delivery group and mode 0440.",
                     )
                 try:
                     verify_container(final, asset.size, asset.digest, limits)

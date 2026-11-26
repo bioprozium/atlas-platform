@@ -104,14 +104,7 @@ def list_structures(connection: Connection, filters: StructureFilters) -> Page[S
         query = query.where(name_match.exists())
 
     rows, has_more = fetch_page(connection, query.order_by(structures.code), filters)
-    preferred_names: dict[UUID, list[StructureName]] = defaultdict(list)
-    if rows:
-        for row in connection.execute(
-            select(names.structure_id, names.language, names.name, names.is_preferred)
-            .where(names.structure_id.in_([item.id for item in rows]), names.is_preferred)
-            .order_by(names.language)
-        ).mappings():
-            preferred_names[row.structure_id].append(StructureName.model_validate(row))
+    preferred_names = preferred_names_by_structure(connection, [item.id for item in rows])
 
     return Page[StructureSummary](
         items=[
@@ -127,6 +120,21 @@ def list_structures(connection: Connection, filters: StructureFilters) -> Page[S
         offset=filters.offset,
         has_more=has_more,
     )
+
+
+def preferred_names_by_structure(
+    connection: Connection, ids: Sequence[UUID]
+) -> dict[UUID, list[StructureName]]:
+    preferred_names: dict[UUID, list[StructureName]] = defaultdict(list)
+    if ids:
+        for row in connection.execute(
+            select(names.structure_id, names.language, names.name, names.is_preferred)
+            .where(names.structure_id.in_(ids), names.is_preferred)
+            .order_by(names.language)
+        ).mappings():
+            preferred_names[row.structure_id].append(StructureName.model_validate(row))
+
+    return preferred_names
 
 
 def published_structure(connection: Connection, code: str) -> RowMapping | None:

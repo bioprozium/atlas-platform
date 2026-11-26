@@ -15,7 +15,7 @@ from atlas_api.assets.ingestion import UnconfiguredRegistryError, ingestion_regi
 from atlas_api.assets.validation import ASSET_ROOT, GLBValidationError, open_directory
 
 from .metadata import Manifest, digest_argument, read_manifest
-from .storage import StagedAsset, check_directory, promote, stage
+from .storage import StagedAsset, check_directory, delivery_group, promote, stage
 from .validation import (
     MIB,
     VALIDATOR_NAME,
@@ -140,7 +140,8 @@ def process_storage(
 ) -> None:
     try:
         with open_directory(storage_root, trusted_ancestors=True) as root:
-            check_directory(root)
+            gid = delivery_group(root, getattr(args, "delivery_group", None)) if store else None
+            check_directory(root, delivery_gid=gid)
             try:
                 flock(root, LOCK_EX | LOCK_NB)
             except BlockingIOError:
@@ -152,7 +153,7 @@ def process_storage(
                 report.update(sha256=asset.digest, byte_length=asset.size)
                 validate_staged(asset, limits, args.expected_sha256, report)
                 if store and report["validation_status"] == "passed":
-                    created = promote(root, asset, limits)
+                    created = promote(root, asset, limits, delivery_gid=gid)
                     report.update(
                         storage_verified=True,
                         storage_reference=asset.reference,
@@ -225,6 +226,11 @@ def parser() -> argparse.ArgumentParser:
         operation.add_argument("--expected-sha256", type=digest_argument)
         if name == "import":
             operation.add_argument("--metadata", type=Path, required=True)
+            operation.add_argument(
+                "--delivery-group",
+                choices=["atlasdelivery"],
+                help="Require atlasdelivery traversal and install verified objects with mode 0440.",
+            )
     return result
 
 
