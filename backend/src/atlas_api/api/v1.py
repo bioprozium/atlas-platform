@@ -7,10 +7,12 @@ from pydantic import BaseModel
 from atlas_api.anatomy.router import router as anatomy_router
 from atlas_api.assets.router import router as asset_router
 from atlas_api.db import database_is_ready
+from atlas_api.scenes.router import router as scene_router
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(anatomy_router)
 router.include_router(asset_router)
+router.include_router(scene_router)
 
 
 class HealthResponse(BaseModel):

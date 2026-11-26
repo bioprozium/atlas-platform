@@ -91,6 +91,10 @@ The validator checks the file type, safe path resolution, size, digest, and chun
 
 Revision `0003` adds the registry to the existing `atlas` schema under `atlas_owner`. Rolling back to `0002` drops registry tables and their contents. The P1.1 anatomy tables and data survive that rollback.
 
+## 3D Scene Graph
+
+The read-only endpoints under `/api/v1/scenes` serve versioned scene graphs with exact asset pins. API behavior, transform conventions, and publication prerequisites are covered in the scene documentation. [Scene coordinates and transforms](../docs/SCENE-COORDINATES.md)
+
 ## Install locally
 
 From the repository root, create a virtual environment and install the backend and test dependencies.

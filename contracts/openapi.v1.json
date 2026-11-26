@@ -304,6 +304,46 @@
         "title": "Laterality",
         "type": "string"
       },
+      "LocalTransform": {
+        "properties": {
+          "rotation": {
+            "description": "Local unit quaternion in glTF XYZW order with squared norm within 1e-6 of 1.",
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Rotation",
+            "type": "array"
+          },
+          "scale": {
+            "$ref": "#/components/schemas/Vector3",
+            "description": "Local XYZ scale. The anatomy profile requires unit scale."
+          },
+          "translation": {
+            "$ref": "#/components/schemas/Vector3",
+            "description": "Local XYZ translation in meters."
+          }
+        },
+        "required": [
+          "translation",
+          "rotation",
+          "scale"
+        ],
+        "title": "LocalTransform",
+        "type": "object"
+      },
       "NotReadyResponse": {
         "properties": {
           "status": {
@@ -380,6 +420,70 @@
           "has_more"
         ],
         "title": "Page[AssetVersion]",
+        "type": "object"
+      },
+      "Page_SceneSummary_": {
+        "properties": {
+          "has_more": {
+            "description": "Whether more matching items followed this page.",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SceneSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "Page[SceneSummary]",
+        "type": "object"
+      },
+      "Page_SceneVersion_": {
+        "properties": {
+          "has_more": {
+            "description": "Whether more matching items followed this page.",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SceneVersion"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "Page[SceneVersion]",
         "type": "object"
       },
       "Page_StructureAsset_": {
@@ -531,6 +635,303 @@
         ],
         "title": "RelationType",
         "type": "string"
+      },
+      "SceneAnatomyLink": {
+        "properties": {
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Registry role captured when the draft mapping was saved.",
+            "title": "Role"
+          },
+          "structure_code": {
+            "title": "Structure Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "structure_code",
+          "role"
+        ],
+        "title": "SceneAnatomyLink",
+        "type": "object"
+      },
+      "SceneAssetReference": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "version": {
+            "description": "Exact immutable version identifier within the asset.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "version"
+        ],
+        "title": "SceneAssetReference",
+        "type": "object"
+      },
+      "SceneDetail": {
+        "properties": {
+          "code": {
+            "description": "Stable public scene code.",
+            "title": "Code",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "versions": {
+            "$ref": "#/components/schemas/Page_SceneVersion_"
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "versions"
+        ],
+        "title": "SceneDetail",
+        "type": "object"
+      },
+      "SceneNode": {
+        "properties": {
+          "anatomy_links": {
+            "items": {
+              "$ref": "#/components/schemas/SceneAnatomyLink"
+            },
+            "title": "Anatomy Links",
+            "type": "array"
+          },
+          "asset": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SceneAssetReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "code": {
+            "description": "Stable public node code within the scene version.",
+            "title": "Code",
+            "type": "string"
+          },
+          "node_type": {
+            "enum": [
+              "group",
+              "asset"
+            ],
+            "title": "Node Type",
+            "type": "string"
+          },
+          "parent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Code of the parent in this version, if any.",
+            "title": "Parent Code"
+          },
+          "sort_order": {
+            "description": "Editorial order, with ties resolved by node code.",
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "transform": {
+            "$ref": "#/components/schemas/LocalTransform"
+          }
+        },
+        "required": [
+          "code",
+          "parent_code",
+          "node_type",
+          "sort_order",
+          "transform",
+          "asset",
+          "anatomy_links"
+        ],
+        "title": "SceneNode",
+        "type": "object"
+      },
+      "SceneNodesPage": {
+        "properties": {
+          "has_more": {
+            "description": "Whether more matching items followed this page.",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SceneNode"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "scene_code": {
+            "title": "Scene Code",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more",
+          "scene_code",
+          "version"
+        ],
+        "title": "SceneNodesPage",
+        "type": "object"
+      },
+      "SceneSummary": {
+        "properties": {
+          "code": {
+            "description": "Stable public scene code.",
+            "title": "Code",
+            "type": "string"
+          },
+          "latest_version": {
+            "$ref": "#/components/schemas/SceneVersion"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "latest_version"
+        ],
+        "title": "SceneSummary",
+        "type": "object"
+      },
+      "SceneVersion": {
+        "properties": {
+          "angle_unit": {
+            "const": "rad",
+            "title": "Angle Unit",
+            "type": "string"
+          },
+          "coordinate_profile": {
+            "const": "atlas-anatomy-y-up-v1",
+            "title": "Coordinate Profile",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "origin_description": {
+            "description": "Editorial description of the scene origin.",
+            "title": "Origin Description",
+            "type": "string"
+          },
+          "translation_unit": {
+            "const": "m",
+            "title": "Translation Unit",
+            "type": "string"
+          },
+          "version": {
+            "description": "Immutable version identifier within the scene.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "coordinate_profile",
+          "translation_unit",
+          "angle_unit",
+          "origin_description",
+          "created_at"
+        ],
+        "title": "SceneVersion",
+        "type": "object"
+      },
+      "SceneVersionDetail": {
+        "properties": {
+          "angle_unit": {
+            "const": "rad",
+            "title": "Angle Unit",
+            "type": "string"
+          },
+          "code": {
+            "description": "Stable public scene code.",
+            "title": "Code",
+            "type": "string"
+          },
+          "coordinate_profile": {
+            "const": "atlas-anatomy-y-up-v1",
+            "title": "Coordinate Profile",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "origin_description": {
+            "description": "Editorial description of the scene origin.",
+            "title": "Origin Description",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "translation_unit": {
+            "const": "m",
+            "title": "Translation Unit",
+            "type": "string"
+          },
+          "version": {
+            "description": "Immutable version identifier within the scene.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "coordinate_profile",
+          "translation_unit",
+          "angle_unit",
+          "origin_description",
+          "created_at",
+          "code",
+          "title"
+        ],
+        "title": "SceneVersionDetail",
+        "type": "object"
       },
       "StructureAsset": {
         "properties": {
@@ -795,6 +1196,22 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "Vector3": {
+        "maxItems": 3,
+        "minItems": 3,
+        "prefixItems": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "number"
+          }
+        ],
+        "type": "array"
       }
     }
   },
@@ -1737,6 +2154,361 @@
           }
         },
         "summary": "Readiness"
+      }
+    },
+    "/api/v1/scenes": {
+      "get": {
+        "description": "List published scenes with their latest eligible version in scene code order.",
+        "operationId": "listScenes",
+        "parameters": [
+          {
+            "description": "Maximum number of items to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of items to return.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of matching items to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of matching items to skip.",
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_SceneSummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The scene database is unavailable."
+          }
+        },
+        "summary": "List Scenes",
+        "tags": [
+          "Scenes"
+        ]
+      }
+    },
+    "/api/v1/scenes/{code}": {
+      "get": {
+        "description": "Retrieve a published scene with a page of eligible versions, newest first.",
+        "operationId": "getScene",
+        "parameters": [
+          {
+            "description": "Stable public code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "description": "Stable public code.",
+              "maxLength": 80,
+              "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of items to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of items to return.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of matching items to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of matching items to skip.",
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SceneDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The published scene was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The scene database, required published asset versions, or required published anatomy structures are unavailable."
+          }
+        },
+        "summary": "Get Scene",
+        "tags": [
+          "Scenes"
+        ]
+      }
+    },
+    "/api/v1/scenes/{code}/versions/{version}": {
+      "get": {
+        "description": "Retrieve coordinate and origin metadata for an exact published scene version.",
+        "operationId": "getSceneVersion",
+        "parameters": [
+          {
+            "description": "Stable public code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "description": "Stable public code.",
+              "maxLength": 80,
+              "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Immutable version identifier.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "Immutable version identifier.",
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$",
+              "title": "Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SceneVersionDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The published scene version was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The scene database, required published asset versions, or required published anatomy structures are unavailable."
+          }
+        },
+        "summary": "Get Version",
+        "tags": [
+          "Scenes"
+        ]
+      }
+    },
+    "/api/v1/scenes/{code}/versions/{version}/nodes": {
+      "get": {
+        "description": "List nodes in editorial order, with ties sorted by node code.",
+        "operationId": "listSceneNodes",
+        "parameters": [
+          {
+            "description": "Stable public code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "description": "Stable public code.",
+              "maxLength": 80,
+              "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Immutable version identifier.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "Immutable version identifier.",
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of items to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of items to return.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of matching items to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of matching items to skip.",
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SceneNodesPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The published scene version was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The scene database, required published asset versions, or required published anatomy structures are unavailable."
+          }
+        },
+        "summary": "List Nodes",
+        "tags": [
+          "Scenes"
+        ]
       }
     }
   }
