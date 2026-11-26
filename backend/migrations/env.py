@@ -5,6 +5,7 @@ from atlas_api.anatomy import models  # noqa: F401 - register tables on shared m
 from atlas_api.assets import models as asset_models  # noqa: F401 - register registry tables
 from atlas_api.config import MIGRATION_DATABASE_ENV, MIGRATION_ROLE, read_database_url
 from atlas_api.db import SCHEMA, metadata
+from atlas_api.scenes import models as scene_models  # noqa: F401 - register scene tables
 
 
 def include_name(name, type_, parent_names):

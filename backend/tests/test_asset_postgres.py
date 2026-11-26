@@ -60,7 +60,7 @@ def registry(postgres_url, synthetic_glb):
     url = postgres_url(MIGRATION_ROLE)
     with pytest.MonkeyPatch.context() as env:
         env.setenv(MIGRATION_DATABASE_ENV, url.render_as_string())
-        command.upgrade(Config(str(BACKEND / "alembic.ini")), "0003")
+        command.upgrade(Config(str(BACKEND / "alembic.ini")), "head")
 
     engine = create_engine(url, poolclass=NullPool)
     # The asset and version records use deterministic synthetic GLB metadata.

@@ -137,6 +137,7 @@ anatomy_asset_links = Table(
     Column("version_id", Uuid, ForeignKey(f"{SCHEMA}.asset_versions.id"), nullable=False),
     Column("role", String(CODE_LENGTH)),
     UniqueConstraint("structure_id", "version_id", name="uq_anatomy_asset_links_pair"),
+    UniqueConstraint("id", "version_id", "structure_id", name="uq_anatomy_asset_links_scene_pin"),
     CheckConstraint(f"role ~ '{CODE_PATTERN}'", name="ck_anatomy_asset_links_role"),
     Index("ix_anatomy_asset_links_version", "version_id"),
 )
