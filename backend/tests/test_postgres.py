@@ -133,7 +133,7 @@ def test_migrations_use_owner_role_and_atlas_schema(monkeypatch, postgres_url):
         assert client.get("/api/v1/scenes").status_code == 503
         assert client.get("/api/v1/assets").json()["items"] == []
 
-    command.upgrade(config, "0004")
+    command.upgrade(config, "head")
     command.check(config)
 
     schema_functions = text(
@@ -156,7 +156,7 @@ def test_migrations_use_owner_role_and_atlas_schema(monkeypatch, postgres_url):
 
     with create_engine(runtime_url, poolclass=NullPool).connect() as connection:
         revision = connection.scalar(text("SELECT version_num FROM atlas.alembic_version"))
-        assert revision == ScriptDirectory.from_config(config).get_current_head() == "0004"
+        assert revision == ScriptDirectory.from_config(config).get_current_head() == "0005"
         access = connection.execute(
             text(
                 "SELECT has_schema_privilege(current_user, 'atlas', 'CREATE'), "
@@ -213,7 +213,7 @@ def test_migrations_use_owner_role_and_atlas_schema(monkeypatch, postgres_url):
                 {"tables": sorted(SCENE_TABLES)},
             ).all()
             assert remaining == []
-        command.upgrade(config, "0004")
+        command.upgrade(config, "head")
         command.check(config)
         with create_engine(runtime_url, poolclass=NullPool).connect() as connection:
             assert connection.scalar(text("SELECT count(*) FROM atlas.scenes")) == 0
@@ -231,7 +231,7 @@ def test_migrations_use_owner_role_and_atlas_schema(monkeypatch, postgres_url):
             ).all()
             assert remaining == []
             assert connection.execute(schema_functions, {"names": REGISTRY_FUNCTIONS}).all() == []
-        command.upgrade(config, "0004")
+        command.upgrade(config, "head")
         assert client.get("/api/v1/assets").json()["items"] == []
         assert client.get(f"{path}/assets").json()["items"] == []
         command.check(config)
