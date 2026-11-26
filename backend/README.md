@@ -87,7 +87,7 @@ Use the asset code and version identifier together as the public identifier. Ass
 4. Through the controlled database workflow, set the primary source, record `rights_verified_at` and the internal `rights_review_reference`, then explicitly publish the version and asset. PostgreSQL requires valid status, a primary source belonging to the version, and a recorded rights review before a version can be marked published.
 5. Set a version to `withdrawn` to hide it while preserving its identity and file metadata. Source edits require the version to be unpublished and clear its recorded rights review. Reverify rights before publishing again. Any change to the GLB bytes requires a new version and content address.
 
-The operator CLI combines the registry's integrity checks with Khronos glTF semantic validation. API reads use the recorded publication state and file metadata. Revision `0005` adds private ingestion history and a draft registration function for the separate `atlas_ingest` role. See the [ingestion guide](../processing/README.md#registration-role) for installation and provisioning.
+The operator CLI combines the registry's integrity checks with Khronos glTF semantic validation. API reads use the recorded publication state and file metadata. Revision `0005` adds a private canonical storage binding, ingestion history, and a draft registration function for the separate `atlas_ingest` role. See the [ingestion guide](../processing/README.md#registration-role) for installation and provisioning.
 
 Revision `0003` adds the registry to the existing `atlas` schema under `atlas_owner`. Rolling back to `0002` drops registry tables and their contents. The P1.1 anatomy tables and data survive that rollback.
 

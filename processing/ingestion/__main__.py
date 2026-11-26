@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from atlas_api.assets.ingestion import record_ingestion
+from atlas_api.assets.ingestion import UnconfiguredRegistryError, ingestion_registry
 from atlas_api.assets.validation import ASSET_ROOT, GLBValidationError, open_directory
 
 from .metadata import Manifest, digest_argument, read_manifest
@@ -63,56 +63,39 @@ def run(
             source_geometry=manifest.source_geometry.model_dump(),
         )
 
-    try:
-        with open_directory(args.storage_root, trusted_ancestors=True) as root:
-            check_directory(root)
-            try:
-                flock(root, LOCK_EX | LOCK_NB)
-            except BlockingIOError:
-                raise IngestionError(
-                    "INGESTION_BUSY",
-                    "Another operation is validating this storage root.",
-                ) from None
-            with stage(root, args.input, limits) as asset:
-                report.update(sha256=asset.digest, byte_length=asset.size)
-                validate_staged(asset, limits, args.expected_sha256, report)
-                if manifest is not None and report["validation_status"] == "passed":
-                    created = promote(root, asset, limits)
-                    report.update(
-                        storage_verified=True,
-                        storage_reference=asset.reference,
-                        storage_outcome="created" if created else "reused",
-                    )
-    except IngestionError as exc:
-        if exc.code in {
-            "INPUT_TOO_LARGE",
-            "UNSAFE_INPUT",
-            "INPUT_CHANGED",
-            "SHA256_MISMATCH",
-            "GLB_INTEGRITY",
-            "GLTF_JSON_TOO_LARGE",
-        }:
-            report["validation_status"] = "rejected"
-        add_issue(report, exc.code, str(exc))
-    except (OSError, GLBValidationError):
-        report["storage_verified"] = False
-        add_issue(
-            report,
-            "STAGING_FAILED",
-            "Could not safely stage or clean up the input file.",
-        )
-
-    report["finished_at"] = now()
     if manifest is None:
+        process_storage(
+            args.storage_root or ASSET_ROOT, args, limits, report, store=False
+        )
         return report, 0 if report["validation_status"] == "passed" and not any(
             issue["severity"] == 0 for issue in report["issues"]
         ) else 1
 
     try:
-        registration = record_ingestion(
-            report, manifest.title, [s.model_dump() for s in manifest.sources]
+        with ingestion_registry() as registry:
+            storage_root = args.storage_root or registry.storage_root
+            if storage_root != registry.storage_root:
+                raise IngestionError(
+                    "STORAGE_ROOT_MISMATCH",
+                    "Requested storage root differs from the registry configuration.",
+                )
+            process_storage(storage_root, args, limits, report, store=True)
+            registration = registry.record_ingestion(
+                storage_root,
+                report,
+                manifest.title,
+                [s.model_dump() for s in manifest.sources],
+            )
+    except UnconfiguredRegistryError:
+        return registration_blocked(
+            report,
+            "STORAGE_ROOT_UNCONFIGURED",
+            "The registry has no configured storage root.",
         )
+    except IngestionError as exc:
+        return registration_blocked(report, exc.code, str(exc))
     except (SQLAlchemyError, ValueError):
+        report.setdefault("finished_at", now())
         report["registration"] = {"outcome": "unconfirmed"}
         add_issue(
             report,
@@ -138,6 +121,62 @@ def run(
             "The asset title, version state or provenance differ.",
         )
     return report, 0 if registration.outcome in {"created", "reused"} else 1
+
+
+def registration_blocked(report: dict, code: str, message: str) -> tuple[dict, int]:
+    report["finished_at"] = now()
+    report["registration"] = {"outcome": "not_registered"}
+    add_issue(report, code, message)
+    return report, 1
+
+
+def process_storage(
+    storage_root: Path,
+    args: argparse.Namespace,
+    limits: Limits,
+    report: dict,
+    *,
+    store: bool,
+) -> None:
+    try:
+        with open_directory(storage_root, trusted_ancestors=True) as root:
+            check_directory(root)
+            try:
+                flock(root, LOCK_EX | LOCK_NB)
+            except BlockingIOError:
+                raise IngestionError(
+                    "INGESTION_BUSY",
+                    "Another operation is validating this storage root.",
+                ) from None
+            with stage(root, args.input, limits) as asset:
+                report.update(sha256=asset.digest, byte_length=asset.size)
+                validate_staged(asset, limits, args.expected_sha256, report)
+                if store and report["validation_status"] == "passed":
+                    created = promote(root, asset, limits)
+                    report.update(
+                        storage_verified=True,
+                        storage_reference=asset.reference,
+                        storage_outcome="created" if created else "reused",
+                    )
+    except IngestionError as exc:
+        if exc.code in {
+            "INPUT_TOO_LARGE",
+            "UNSAFE_INPUT",
+            "INPUT_CHANGED",
+            "SHA256_MISMATCH",
+            "GLB_INTEGRITY",
+            "GLTF_JSON_TOO_LARGE",
+        }:
+            report["validation_status"] = "rejected"
+        add_issue(report, exc.code, str(exc))
+    except (OSError, GLBValidationError):
+        report["storage_verified"] = False
+        add_issue(
+            report,
+            "STAGING_FAILED",
+            "Could not safely stage or clean up the input file.",
+        )
+    report["finished_at"] = now()
 
 
 def validate_staged(
@@ -167,7 +206,11 @@ def validate_staged(
 def parser() -> argparse.ArgumentParser:
     defaults = Limits()
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("--storage-root", type=Path, default=ASSET_ROOT)
+    result.add_argument(
+        "--storage-root",
+        type=Path,
+        help="Override the inspection directory or assert the database-configured root for import.",
+    )
     result.add_argument(
         "--max-input-mib", type=int, default=defaults.input_bytes // MIB
     )

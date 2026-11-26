@@ -1,4 +1,4 @@
-"""Add private ingestion history and the draft registration boundary."""
+"""Add private storage configuration, ingestion history, and draft registration."""
 
 from alembic import op
 
@@ -9,6 +9,33 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.execute(
+        """
+        CREATE TABLE atlas.ingestion_storage (
+            singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+            storage_root text NOT NULL CHECK (
+                storage_root ~ '^/[^/]+(/[^/]+)*$'
+                AND storage_root !~ '(^|/)[.]{1,2}(/|$)'
+                AND storage_root !~ '[[:cntrl:]]'
+            )
+        )
+        """
+    )
+    op.execute("REVOKE ALL ON atlas.ingestion_storage FROM PUBLIC, atlas_app")
+    op.execute(
+        """
+        CREATE FUNCTION atlas.ingestion_storage_root() RETURNS text
+        LANGUAGE sql SECURITY DEFINER
+        SET search_path = pg_catalog, pg_temp
+        AS $$
+            SELECT storage_root FROM atlas.ingestion_storage WHERE singleton FOR SHARE
+        $$
+        """
+    )
+    op.execute(
+        "REVOKE ALL ON FUNCTION atlas.ingestion_storage_root() FROM PUBLIC, atlas_app"
+    )
+
     op.execute(
         """
         CREATE TABLE atlas.asset_ingestions (
@@ -34,12 +61,15 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE FUNCTION atlas.record_asset_ingestion(p_report jsonb, p_title text, p_sources jsonb)
+        CREATE FUNCTION atlas.record_asset_ingestion(
+            p_storage_root text, p_report jsonb, p_title text, p_sources jsonb
+        )
         RETURNS TABLE(outcome text, version_id uuid)
         LANGUAGE plpgsql SECURITY DEFINER
         SET search_path = pg_catalog, pg_temp
         AS $$
         DECLARE
+            canonical_root text := atlas.ingestion_storage_root();
             asset_key text := p_report->>'asset_code';
             version_key text := p_report->>'version';
             digest text := p_report->>'sha256';
@@ -52,6 +82,11 @@ def upgrade() -> None:
             recorded_sources jsonb;
             recorded_geometry jsonb;
         BEGIN
+            IF canonical_root IS NULL OR p_storage_root IS DISTINCT FROM canonical_root THEN
+                RAISE EXCEPTION 'Ingestion storage root does not match the registry configuration'
+                    USING ERRCODE = '42501';
+            END IF;
+
             outcome := 'not_registered';
             IF validation = 'passed' AND p_report->'storage_verified' = 'true'::jsonb THEN
                 IF p_report#>>'{validator,name}' IS DISTINCT FROM 'Khronos glTF Validator'
@@ -145,14 +180,16 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        "REVOKE ALL ON FUNCTION atlas.record_asset_ingestion(jsonb, text, jsonb) FROM PUBLIC"
+        "REVOKE ALL ON FUNCTION atlas.record_asset_ingestion(text, jsonb, text, jsonb) "
+        "FROM PUBLIC, atlas_app"
     )
     op.execute(
         """
         DO $$
         BEGIN
             IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'atlas_ingest') THEN
-                GRANT EXECUTE ON FUNCTION atlas.record_asset_ingestion(jsonb, text, jsonb)
+                GRANT EXECUTE ON FUNCTION atlas.ingestion_storage_root(),
+                    atlas.record_asset_ingestion(text, jsonb, text, jsonb)
                     TO atlas_ingest;
             END IF;
         END
@@ -162,5 +199,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("DROP FUNCTION atlas.record_asset_ingestion(jsonb, text, jsonb)")
+    op.execute("DROP FUNCTION atlas.record_asset_ingestion(text, jsonb, text, jsonb)")
+    op.execute("DROP FUNCTION atlas.ingestion_storage_root()")
+    op.drop_table("ingestion_storage", schema="atlas")
     op.drop_table("asset_ingestions", schema="atlas")

@@ -11,25 +11,34 @@ npm --prefix processing/ingestion ci --ignore-scripts --no-audit --no-fund
 python -m processing.ingestion --help
 ```
 
-Run the CLI as a dedicated, unprivileged operator account. Its default storage root is `/srv/atlas/assets`. For local work, create an operator-owned directory with mode `0700` and pass its absolute path before the subcommand. Use one storage root per registry. Keep staging and content buckets on the same local filesystem with hard-link, file and directory sync, and advisory lock support.
+Run the CLI as a dedicated, unprivileged operator account on the host that mounts the registry's canonical store. Keep staging and content buckets on the same local filesystem with hard-link, file and directory sync, and advisory lock support. Inspection defaults to `/srv/atlas/assets` and can use any safe directory supplied with `--storage-root`. Import uses the connected registry's canonical root. If supplied for import, `--storage-root` must match that binding.
 
 ```sh
 umask 077
 mkdir -m 700 "$PWD/local-assets"
 python -m processing.ingestion --storage-root "$PWD/local-assets" inspect input.glb > inspect.json
-python -m processing.ingestion --storage-root "$PWD/local-assets" import input.glb \
-    --metadata source.json > ingestion.json
+python -m processing.ingestion import input.glb --metadata source.json > ingestion.json
 ```
 
 Both commands accept `--expected-sha256 <lowercase-digest>` after the input. Use it when you have a trusted digest from the source. `inspect` runs the same integrity and semantic checks as `import`, then removes its quarantine copy. `import` also verifies the final stored object and registers its immutable version UUID and source records in a database transaction.
 
 ### Registration role
 
-On a disposable local PostgreSQL 16 instance, apply Alembic revision `0005` using the existing migration workflow. Then run `backend/provision_ingestion.sql` as a database administrator and set up authentication for `atlas_ingest` using the instance's local authentication policy. For password authentication, use the interactive `\password atlas_ingest` prompt. Provide the CLI with `ATLAS_INGESTION_DATABASE_URL`, a `postgresql+psycopg` URL for `atlas_ingest` on `atlas_db`. Store credentials through the normal secret handling workflow. [Backend PostgreSQL setup](../backend/README.md#configure-postgresql)
+On a disposable local PostgreSQL 16 instance, apply Alembic revision `0005` using the existing migration workflow. Run `backend/provision_ingestion.sql` as a database administrator. It binds the registry to `/srv/atlas/assets` by default. For an explicitly isolated local or test registry, provide `atlas_storage_root` when provisioning it and point the CLI at that database. Run this example from the repository root against the local instance. [Backend PostgreSQL setup](../backend/README.md#configure-postgresql)
 
-`atlas_ingest` receives database `CONNECT`, schema `USAGE`, and `EXECUTE` on `atlas.record_asset_ingestion`. It has no registry table grants, migration role membership, or access to read audit records. The function has a fixed search path, registers only new draft records, and compares an existing version and its source records before reporting reuse. It uses the operator CLI's attestation about validation and verified storage. Restrict access to the database credential and operator account accordingly. `atlas_app` cannot call the function or read ingestion history.
+```sh
+psql -X -d postgres -v "atlas_storage_root=$PWD/local-assets" -f backend/provision_ingestion.sql
+```
 
-A rollback to `0004` removes the ingestion function and audit history. It preserves registry rows, scene pins, and storage objects. Archive any required audit records before rollback. Reapplying `0005` restores the function grant if the dedicated role is already provisioned.
+Provisioning accepts the same binding on reruns and refuses a different one. Set up authentication for `atlas_ingest` using the instance's local policy. For password authentication, use the interactive `\password atlas_ingest` prompt. Give the CLI `ATLAS_INGESTION_DATABASE_URL`, a `postgresql+psycopg` URL for `atlas_ingest` on `atlas_db`. Store credentials through the normal secret handling workflow.
+
+### Storage trust boundary
+
+- The database owner controls the canonical absolute root in the private `atlas.ingestion_storage` table. The CLI reads that binding using the same database transaction it will use for registration. A different requested root stops the import before staging, promotion, or any registry or audit write. The binding stays locked through promotion and registration. The database function independently checks the root claimed by its caller before it makes any writes.
+- `atlas_ingest` receives database `CONNECT`, schema `USAGE`, and `EXECUTE` on the binding reader and draft registration function. It has no table grants or migration role membership. `atlas_app` has no access to these functions, the binding, or ingestion history. Registry records and reports carry relative content references.
+- The CLI verifies the bytes in the configured store. PostgreSQL checks the claimed root against the configured path and trusts the CLI's validation and storage attestation. A caller with direct use of the ingestion credential can fabricate an attestation, and the configured path alone cannot establish that two hosts or mounts share the same files. Restrict direct use of the credential, control the mount and its ancestors as deployment configuration, and run the importer against the designated filesystem.
+
+A rollback to `0004` removes the root binding, ingestion functions, and audit history. It preserves registry rows, scene pins, and storage objects. Archive the binding and any required audit records before rollback. After reapplying `0005`, rerun provisioning with the original root before resuming imports.
 
 ### Source manifest
 

@@ -1,9 +1,13 @@
 """Database boundary for the offline draft asset importer."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -18,6 +22,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.engine import Connection
 from sqlalchemy.pool import NullPool
 
 from atlas_api.config import read_database_url
@@ -25,6 +30,19 @@ from atlas_api.db import metadata
 
 INGESTION_DATABASE_ENV = "ATLAS_INGESTION_DATABASE_URL"
 INGESTION_ROLE = "atlas_ingest"
+
+ingestion_storage = Table(
+    "ingestion_storage",
+    metadata,
+    Column("singleton", Boolean, primary_key=True, server_default=text("true")),
+    Column("storage_root", Text, nullable=False),
+    CheckConstraint("singleton"),
+    CheckConstraint(
+        "storage_root ~ '^/[^/]+(/[^/]+)*$' "
+        "AND storage_root !~ '(^|/)[.]{1,2}(/|$)' "
+        "AND storage_root !~ '[[:cntrl:]]'"
+    ),
+)
 
 asset_ingestions = Table(
     "asset_ingestions",
@@ -63,7 +81,7 @@ asset_ingestions = Table(
 REGISTER = text(
     """
     SELECT outcome, version_id
-    FROM atlas.record_asset_ingestion(:report, :title, :sources)
+    FROM atlas.record_asset_ingestion(:storage_root, :report, :title, :sources)
     """
 ).bindparams(bindparam("report", type_=JSONB), bindparam("sources", type_=JSONB))
 
@@ -74,7 +92,33 @@ class Registration:
     version_id: UUID | None
 
 
-def record_ingestion(report: dict, title: str, sources: list[dict]) -> Registration:
+class UnconfiguredRegistryError(ValueError):
+    """The database owner has yet to bind the registry to a storage root."""
+
+
+@dataclass(frozen=True)
+class IngestionRegistry:
+    connection: Connection
+    storage_root: Path
+
+    def record_ingestion(
+        self, storage_root: Path, report: dict, title: str, sources: list[dict]
+    ) -> Registration:
+        row = self.connection.execute(
+            REGISTER,
+            {
+                "storage_root": str(storage_root),
+                "report": report,
+                "title": title,
+                "sources": sources,
+            },
+        ).one()
+        return Registration(row.outcome, row.version_id)
+
+
+@contextmanager
+def ingestion_registry() -> Iterator[IngestionRegistry]:
+    """Keep the database-owned storage binding locked through promotion and registration."""
     url = read_database_url(INGESTION_DATABASE_ENV, INGESTION_ROLE)
     if url is None:
         raise ValueError(f"Set {INGESTION_DATABASE_ENV} for draft imports.")
@@ -87,9 +131,9 @@ def record_ingestion(report: dict, title: str, sources: list[dict]) -> Registrat
     )
     try:
         with engine.begin() as connection:
-            row = connection.execute(
-                REGISTER, {"report": report, "title": title, "sources": sources}
-            ).one()
-        return Registration(row.outcome, row.version_id)
+            root = connection.scalar(text("SELECT atlas.ingestion_storage_root()"))
+            if root is None:
+                raise UnconfiguredRegistryError
+            yield IngestionRegistry(connection, Path(root))
     finally:
         engine.dispose()

@@ -4,18 +4,26 @@ import json
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from hashlib import sha256
 from pathlib import Path
 from struct import pack
+from threading import Barrier
+from uuid import uuid4
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.pool import NullPool
 
-from atlas_api.assets.ingestion import INGESTION_DATABASE_ENV, INGESTION_ROLE
+from atlas_api.assets.ingestion import (
+    INGESTION_DATABASE_ENV,
+    INGESTION_ROLE,
+    ingestion_registry,
+)
+from atlas_api.assets.validation import glb_storage_reference
 from atlas_api.config import (
     MIGRATION_DATABASE_ENV,
     MIGRATION_ROLE,
@@ -30,15 +38,14 @@ REPO = BACKEND.parent
 
 
 @pytest.fixture(scope="module")
-def database(postgres_url, postgres_socket):
-    config = Config(str(BACKEND / "alembic.ini"))
-    with pytest.MonkeyPatch.context() as env:
-        env.setenv(
-            MIGRATION_DATABASE_ENV, postgres_url(MIGRATION_ROLE).render_as_string()
-        )
-        command.upgrade(config, "0004")
-        command.upgrade(config, "head")
-        subprocess.run(
+def canonical_root(tmp_path_factory):
+    return tmp_path_factory.mktemp("canonical-assets")
+
+
+@pytest.fixture(scope="module")
+def provision(postgres_socket):
+    def configure(root, *, check=True):
+        return subprocess.run(
             [
                 "psql",
                 "-X",
@@ -48,12 +55,29 @@ def database(postgres_url, postgres_socket):
                 "atlas_test_admin",
                 "-d",
                 "atlas_db",
+                "-v",
+                f"atlas_storage_root={root}",
                 "-f",
                 str(BACKEND / "provision_ingestion.sql"),
             ],
-            check=True,
+            check=check,
             capture_output=True,
+            text=True,
         )
+
+    return configure
+
+
+@pytest.fixture(scope="module")
+def database(postgres_url, canonical_root, provision):
+    config = Config(str(BACKEND / "alembic.ini"))
+    with pytest.MonkeyPatch.context() as env:
+        env.setenv(
+            MIGRATION_DATABASE_ENV, postgres_url(MIGRATION_ROLE).render_as_string()
+        )
+        command.upgrade(config, "0004")
+        command.upgrade(config, "head")
+        provision(canonical_root)
         env.setenv(
             INGESTION_DATABASE_ENV, postgres_url(INGESTION_ROLE).render_as_string()
         )
@@ -66,13 +90,11 @@ def database(postgres_url, postgres_socket):
 
 
 @pytest.fixture
-def paths(tmp_path, synthetic_glb):
+def paths(tmp_path, synthetic_glb, canonical_root):
     source = tmp_path / "fixture.bin"
     source.write_bytes(synthetic_glb)
     metadata = tmp_path / "metadata.json"
-    root = tmp_path / "objects"
-    root.mkdir(mode=0o700)
-    return source, metadata, root
+    return source, metadata, canonical_root
 
 
 def manifest(path, code, version="1", creator="Synthetic Author"):
@@ -110,8 +132,7 @@ def invoke(paths, *, launch=None):
         [
             sys.executable,
             *(launch or ["-m", "processing.ingestion"]),
-            "--storage-root",
-            str(root),
+            *(["--storage-root", str(root)] if root is not None else []),
             "import",
             str(source),
             "--metadata",
@@ -130,8 +151,8 @@ def run_import(paths, status=0):
     return json.loads(result.stdout)
 
 
-def changed_glb():
-    payload = b'{"asset":{"version":"2.0","generator":"synthetic"}}'
+def tagged_glb(generator):
+    payload = json.dumps({"asset": {"version": "2.0", "generator": generator}}).encode()
     payload += b" " * (-len(payload) % 4)
     return (
         pack("<4sIII4s", b"glTF", 2, 20 + len(payload), len(payload), b"JSON") + payload
@@ -143,8 +164,10 @@ def test_draft_idempotence_conflicts_and_exact_version_provenance(database, path
     source, metadata, root = paths
     code = "synthetic-ingestion"
     manifest(metadata, code)
+    source.write_bytes(tagged_glb(code))
 
-    created = run_import(paths)
+    # Imports without an override take their root from this isolated registry.
+    created = run_import((*paths[:2], None))
     first_id = created["registration"]["version_id"]
     assert created["registration"]["outcome"] == "created"
     assert created["storage_outcome"] == "created"
@@ -165,12 +188,13 @@ def test_draft_idempotence_conflicts_and_exact_version_provenance(database, path
 
     manifest(metadata, code)
     original = source.read_bytes()
-    source.write_bytes(changed_glb())
+    changed = tagged_glb("conflicting-ingestion")
+    source.write_bytes(changed)
     conflict = run_import(paths, status=1)
     assert conflict["registration"]["outcome"] == "content_conflict"
     assert conflict["issues"][-1]["code"] == "VERSION_CONTENT_CONFLICT"
     assert destination.read_bytes() == original
-    assert (root / conflict["storage_reference"]).read_bytes() == changed_glb()
+    assert (root / conflict["storage_reference"]).read_bytes() == changed
 
     manifest(metadata, code, version="2", creator="Other Synthetic Author")
     second = run_import(paths)
@@ -225,6 +249,7 @@ def test_draft_idempotence_conflicts_and_exact_version_provenance(database, path
         assert audit.report["validator"]["version"] == "2.0.0-dev.3.10"
         assert audit.report["started_at"] <= audit.report["finished_at"]
         assert audit.report["source_geometry"]["orientation"] == "Y-up"
+        assert str(root) not in json.dumps(audit.report)
 
     with TestClient(create_app()) as client:
         path = f"/api/v1/assets/{code}/versions/1"
@@ -301,7 +326,7 @@ def test_rejected_validation_is_audited_without_registered_asset(database, paths
     report = run_import(paths, status=1)
     assert report["validation_status"] == "rejected"
     assert report["registration"]["outcome"] == "not_registered"
-    assert not (root / "sha256").exists()
+    assert not (root / glb_storage_reference(report["sha256"])).exists()
     with engine(MIGRATION_ROLE).begin() as conn:
         conn.execute(text("SET LOCAL ROLE atlas_owner"))
         assert (
@@ -347,12 +372,124 @@ def test_warnings_are_preserved_for_editorial_review(database, paths):
         )
 
 
+def test_mismatched_root_cannot_promote_or_register(database, paths, tmp_path):
+    _config, engine = database
+    source, metadata, canonical = paths
+    code = "mismatched-storage"
+    manifest(metadata, code)
+    source.write_bytes(tagged_glb(code))
+    alternate = tmp_path / "unrelated-storage"
+    alternate.mkdir(mode=0o700)
+    declaration = json.loads(metadata.read_text())
+
+    rejected = invoke((source, metadata, alternate))
+    assert rejected.returncode == 1
+    report = json.loads(rejected.stdout)
+    assert report["registration"]["outcome"] == "not_registered"
+    assert report["issues"][0]["code"] == "STORAGE_ROOT_MISMATCH"
+    assert report["storage_verified"] is False
+    assert str(canonical) not in rejected.stdout + rejected.stderr
+    assert str(alternate) not in rejected.stdout + rejected.stderr
+    assert not list(alternate.iterdir())
+
+    inspection = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "processing.ingestion",
+            "--storage-root",
+            str(alternate),
+            "inspect",
+            str(source),
+        ],
+        cwd=REPO,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    attestation = json.loads(inspection.stdout)
+    assert attestation["validation_status"] == "passed"
+    reference = glb_storage_reference(attestation["sha256"])
+    attestation.update(
+        operation="import",
+        asset_code=code,
+        version=declaration["version"],
+        source_geometry=declaration["source_geometry"],
+        storage_verified=True,
+        storage_reference=reference,
+    )
+    with pytest.raises(ProgrammingError) as denied, ingestion_registry() as registry:
+        registry.record_ingestion(
+            alternate, attestation, declaration["title"], declaration["sources"]
+        )
+    assert denied.value.orig.sqlstate == "42501"
+    assert str(canonical) not in str(denied.value)
+    assert str(alternate) not in str(denied.value)
+
+    assert not (alternate / reference).exists()
+    assert not (canonical / reference).exists()
+    with engine(MIGRATION_ROLE).begin() as conn:
+        conn.execute(text("SET LOCAL ROLE atlas_owner"))
+        assert (
+            conn.scalar(
+                text("SELECT count(*) FROM atlas.assets WHERE code = :code"),
+                {"code": code},
+            )
+            == 0
+        )
+        assert (
+            conn.scalar(
+                text(
+                    "SELECT count(*) FROM atlas.asset_ingestions WHERE asset_code = :code"
+                ),
+                {"code": code},
+            )
+            == 0
+        )
+
+
+def test_provisioning_cannot_rebind_an_existing_registry(
+    database, canonical_root, provision, tmp_path
+):
+    alternate = tmp_path / "alternate"
+    failed = provision(alternate, check=False)
+    assert failed.returncode != 0
+    assert "already bound to a different storage root" in failed.stderr
+    assert str(canonical_root) not in failed.stderr
+    assert str(alternate) not in failed.stderr
+    with ingestion_registry() as registry:
+        assert registry.storage_root == canonical_root
+
+
+def test_storage_binding_is_locked_during_ingestion(database, canonical_root):
+    _config, engine = database
+    with ingestion_registry() as registry:
+        assert registry.storage_root == canonical_root
+        with (
+            pytest.raises(OperationalError) as blocked,
+            engine(MIGRATION_ROLE).begin() as conn,
+        ):
+            conn.execute(text("SET LOCAL ROLE atlas_owner"))
+            conn.execute(text("SET LOCAL lock_timeout = '150ms'"))
+            conn.execute(
+                text("UPDATE atlas.ingestion_storage SET storage_root = '/alternate'")
+            )
+        assert blocked.value.orig.sqlstate == "55P03"
+
+
 @pytest.mark.parametrize(
     ("role", "statement"),
     [
         (RUNTIME_ROLE, "SELECT * FROM atlas.asset_ingestions"),
-        (RUNTIME_ROLE, "SELECT atlas.record_asset_ingestion(NULL, NULL, NULL)"),
+        (RUNTIME_ROLE, "SELECT atlas.record_asset_ingestion(NULL, NULL, NULL, NULL)"),
+        (RUNTIME_ROLE, "SELECT atlas.ingestion_storage_root()"),
+        (RUNTIME_ROLE, "SELECT * FROM atlas.ingestion_storage"),
         (INGESTION_ROLE, "SELECT * FROM atlas.asset_ingestions"),
+        (INGESTION_ROLE, "SELECT * FROM atlas.ingestion_storage"),
+        (
+            INGESTION_ROLE,
+            "UPDATE atlas.ingestion_storage SET storage_root = '/alternate'",
+        ),
         (INGESTION_ROLE, "INSERT INTO atlas.asset_ingestions DEFAULT VALUES"),
         (
             INGESTION_ROLE,
@@ -386,9 +523,12 @@ def test_database_role_permissions(database, role, statement):
 @pytest.mark.parametrize("point", ["before", "after"])
 def test_retry_after_interrupted_database_commit(database, paths, point):
     _config, engine = database
-    _source, metadata, root = paths
+    source, metadata, root = paths
     code = f"crash-{point}"
     manifest(metadata, code)
+    source.write_bytes(tagged_glb(code))
+    object_path = root / glb_storage_reference(sha256(source.read_bytes()).hexdigest())
+    assert not object_path.exists()
     crash = """
 import os
 import sys
@@ -401,17 +541,17 @@ if sys.argv.pop(1) == "before":
     def crash_on_commit(_connection):
         os._exit(73)
 else:
-    register = cli.record_ingestion
+    run = cli.run
     def crash_after_commit(*args):
-        register(*args)
+        run(*args)
         os._exit(73)
-    cli.record_ingestion = crash_after_commit
+    cli.run = crash_after_commit
 
 sys.exit(cli.main())
 """
     interrupted = invoke(paths, launch=["-c", crash, point])
     assert interrupted.returncode == 73, (interrupted.stdout, interrupted.stderr)
-    (only_object,) = (root / "sha256").glob("*/*.glb")
+    assert object_path.is_file()
     assert not list((root / ".quarantine").iterdir())
     with engine(MIGRATION_ROLE).begin() as conn:
         conn.execute(text("SET LOCAL ROLE atlas_owner"))
@@ -424,29 +564,47 @@ sys.exit(cli.main())
 
     result = run_import(paths)
     assert result["storage_outcome"] == "reused"
-    assert only_object == root / result["storage_reference"]
+    assert object_path == root / result["storage_reference"]
     assert result["registration"]["outcome"] == (
         "created" if point == "before" else "reused"
     )
 
 
-def test_concurrent_registration_returns_same_draft(database, paths, tmp_path):
-    _source, metadata, _root = paths
-    manifest(metadata, "parallel-ingestion")
-    second_root = tmp_path / "alternate-objects"
-    second_root.mkdir(mode=0o700)
-    # Separate stores bypass the per-store validation lock to exercise the database race.
+def test_concurrent_registration_returns_same_draft(database, paths):
+    source, metadata, root = paths
+    source.write_bytes(tagged_glb("parallel-ingestion"))
+    manifest(metadata, "parallel-witness")
+    report = run_import(paths)
+    assert (root / report["storage_reference"]).read_bytes() == source.read_bytes()
+    report.pop("registration")
+    declaration = json.loads(metadata.read_text())
+    barrier = Barrier(2, timeout=10)
+
+    # Both callers attest the same verified object in the canonical store.
+    def register():
+        with ingestion_registry() as registry:
+            assert registry.storage_root == root
+            barrier.wait()
+            return registry.record_ingestion(
+                root,
+                dict(
+                    report, asset_code="parallel-ingestion", ingestion_id=str(uuid4())
+                ),
+                declaration["title"],
+                declaration["sources"],
+            )
+
     with ThreadPoolExecutor(max_workers=2) as executor:
-        first = executor.submit(run_import, paths)
-        second = executor.submit(run_import, (*paths[:2], second_root))
-        registrations = [result.result()["registration"] for result in (first, second)]
-    assert {r["outcome"] for r in registrations} == {"created", "reused"}
-    assert registrations[0]["version_id"] == registrations[1]["version_id"]
+        first = executor.submit(register)
+        second = executor.submit(register)
+        registrations = [result.result() for result in (first, second)]
+    assert {r.outcome for r in registrations} == {"created", "reused"}
+    assert registrations[0].version_id == registrations[1].version_id
 
 
-def test_ingestion_migration_roundtrip_preserves_registry(database, paths):
+def test_ingestion_migration_roundtrip_preserves_registry(database, paths, provision):
     config, engine = database
-    _source, metadata, _root = paths
+    _source, metadata, root = paths
     manifest(metadata, "migration-ingestion")
     created = run_import(paths)
     exact_id = created["registration"]["version_id"]
@@ -455,9 +613,18 @@ def test_ingestion_migration_roundtrip_preserves_registry(database, paths):
         conn.execute(text("SET LOCAL ROLE atlas_owner"))
         assert conn.scalar(text("SELECT to_regclass('atlas.asset_ingestions')")) is None
         assert (
+            conn.scalar(text("SELECT to_regclass('atlas.ingestion_storage')")) is None
+        )
+        assert (
+            conn.scalar(
+                text("SELECT to_regprocedure('atlas.ingestion_storage_root()')")
+            )
+            is None
+        )
+        assert (
             conn.scalar(
                 text(
-                    "SELECT to_regprocedure('atlas.record_asset_ingestion(jsonb,text,jsonb)')"
+                    "SELECT to_regprocedure('atlas.record_asset_ingestion(text,jsonb,text,jsonb)')"
                 )
             )
             is None
@@ -472,6 +639,10 @@ def test_ingestion_migration_roundtrip_preserves_registry(database, paths):
 
     command.upgrade(config, "head")
     command.check(config)
+    unconfigured = run_import(paths, status=1)
+    assert unconfigured["issues"][0]["code"] == "STORAGE_ROOT_UNCONFIGURED"
+    assert unconfigured["registration"]["outcome"] == "not_registered"
+    provision(root)
     assert run_import(paths)["registration"] == {
         "outcome": "reused",
         "version_id": exact_id,
