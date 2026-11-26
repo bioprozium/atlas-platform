@@ -1,6 +1,7 @@
 from alembic import context
 from sqlalchemy import create_engine, pool
 
+from atlas_api.anatomy import models  # noqa: F401 - register tables on shared metadata
 from atlas_api.config import MIGRATION_DATABASE_ENV, MIGRATION_ROLE, read_database_url
 from atlas_api.db import SCHEMA, metadata
 
