@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import Connection, RowMapping, case, or_, select, true
+from sqlalchemy import Connection, RowMapping, Select, case, func, or_, select, true
 
 from atlas_api.anatomy.models import anatomical_structures
 from atlas_api.anatomy.queries import fetch_page
@@ -31,14 +31,14 @@ structure = anatomical_structures.c
 mapping = scene_node_anatomy_links.c
 
 SCENE_FIELDS = (scene.code, scene.title)
-VERSION_FIELDS = (
+VERSION_METADATA_FIELDS = (
     version.version,
     version.coordinate_profile,
     version.translation_unit,
     version.angle_unit,
-    version.origin_description,
     version.created_at,
 )
+VERSION_FIELDS = (*VERSION_METADATA_FIELDS, version.origin_description)
 VERSION_ORDER = (version.created_at.desc(), version.version.desc())
 PUBLISHED_SCENE = scene.review_state == "published"
 PUBLISHED_SCENE_VERSION = version.publication_state == "published"
@@ -131,12 +131,22 @@ def list_versions(
     )
 
 
-def get_version(connection: Connection, code: str, identifier: str) -> RowMapping | None:
+def get_version(
+    connection: Connection, code: str, identifier: str, *, origin_byte_limit: int | None = None
+) -> RowMapping | None:
+    origin = version.origin_description
+    if origin_byte_limit is not None:
+        # The stored origin is non-null. A null projection signals an oversized
+        # origin without copying the value to the database client.
+        origin = case(
+            (func.octet_length(origin) <= origin_byte_limit, origin)
+        ).label("origin_description")
     query = (
         select(
             version.id,
             *SCENE_FIELDS,
-            *VERSION_FIELDS,
+            *VERSION_METADATA_FIELDS,
+            origin,
             case(
                 (~ASSETS_AVAILABLE, "assets"),
                 (~ANNOTATIONS_AVAILABLE, "anatomy"),
@@ -178,11 +188,9 @@ def anatomy_links_by_node(
     return grouped
 
 
-def list_nodes(
-    connection: Connection, scene_version: RowMapping, filters: Pagination
-) -> SceneNodesPage:
+def nodes_query(scene_version_id: UUID) -> Select:
     parent = scene_nodes.alias("parent")
-    query = (
+    return (
         select(
             node.id,
             node.code,
@@ -200,28 +208,37 @@ def list_nodes(
             .outerjoin(asset_versions, node.asset_version_id == asset_version.id)
             .outerjoin(assets, asset_version.asset_id == asset.id)
         )
-        .where(node.scene_version_id == scene_version.id)
+        .where(node.scene_version_id == scene_version_id)
         .order_by(node.sort_order, node.code)
     )
-    rows, has_more = fetch_page(connection, query, filters)
+
+
+def build_nodes(connection: Connection, rows: Sequence[RowMapping]) -> list[SceneNode]:
     links = anatomy_links_by_node(connection, rows)
+    return [
+        SceneNode(
+            code=row.code,
+            parent_code=row.parent_code,
+            node_type=row.node_type,
+            sort_order=row.sort_order,
+            transform=LocalTransform.model_validate(row),
+            asset=SceneAssetReference(code=row.asset_code, version=row.asset_version)
+            if row.asset_code is not None
+            else None,
+            anatomy_links=links[row.id],
+        )
+        for row in rows
+    ]
+
+
+def list_nodes(
+    connection: Connection, scene_version: RowMapping, filters: Pagination
+) -> SceneNodesPage:
+    rows, has_more = fetch_page(connection, nodes_query(scene_version.id), filters)
     return SceneNodesPage(
         scene_code=scene_version.code,
         version=scene_version.version,
-        items=[
-            SceneNode(
-                code=row.code,
-                parent_code=row.parent_code,
-                node_type=row.node_type,
-                sort_order=row.sort_order,
-                transform=LocalTransform.model_validate(row),
-                asset=SceneAssetReference(code=row.asset_code, version=row.asset_version)
-                if row.asset_code is not None
-                else None,
-                anatomy_links=links[row.id],
-            )
-            for row in rows
-        ],
+        items=build_nodes(connection, rows),
         limit=filters.limit,
         offset=filters.offset,
         has_more=has_more,

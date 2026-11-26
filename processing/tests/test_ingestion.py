@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import stat
 import subprocess
 import sys
 from base64 import b64encode
@@ -479,3 +480,31 @@ for family in (socket.AF_INET, socket.AF_INET6, socket.AF_UNIX):
         ],
         check=True,
     )
+
+
+def test_delivery_promotion_permissions_and_retry(input_and_root):
+    source, root = input_and_root
+    gid = os.getegid()
+    root.chmod(0o2750)
+    with (
+        pytest.MonkeyPatch.context() as patch,
+        open_directory(root, trusted_ancestors=True) as directory,
+    ):
+        patch.setattr(storage.grp, "getgrnam", lambda name: storage.grp.getgrgid(gid))
+        assert storage.delivery_group(directory, "atlasdelivery") == gid
+        storage.check_directory(directory, delivery_gid=gid)
+        for created in (True, False):
+            with storage.stage(directory, source, DEFAULT_LIMITS) as staged:
+                quarantine = root / ".quarantine"
+                assert stat.S_IMODE(quarantine.stat().st_mode) & 0o777 == 0o700
+                assert stat.S_IMODE(os.fstat(staged.file.fileno()).st_mode) == 0o400
+                assert storage.promote(
+                    directory, staged, DEFAULT_LIMITS, delivery_gid=gid
+                ) is created
+                path = root / staged.reference
+                assert path.stat().st_gid == gid
+                assert stat.S_IMODE(path.stat().st_mode) == 0o440
+                assert stat.S_IMODE(path.parent.stat().st_mode) == 0o2750
+                assert stat.S_IMODE(path.parent.parent.stat().st_mode) == 0o2750
+                assert path.stat().st_uid == os.geteuid()
+            assert list(quarantine.iterdir()) == []

@@ -16,7 +16,7 @@ from sqlalchemy import case, create_engine, delete, select, text, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.pool import NullPool
 
-from atlas_api.anatomy.models import anatomical_structures
+from atlas_api.anatomy.models import anatomical_structures, structure_names
 from atlas_api.assets.models import anatomy_asset_links, asset_sources, asset_versions, assets
 from atlas_api.assets.validation import glb_storage_reference
 from atlas_api.config import (
@@ -26,6 +26,7 @@ from atlas_api.config import (
     RUNTIME_ROLE,
 )
 from atlas_api.main import create_app
+from atlas_api.scenes import queries
 from atlas_api.scenes.models import scene_node_anatomy_links, scene_nodes, scene_versions, scenes
 
 pytestmark = pytest.mark.integration
@@ -153,8 +154,8 @@ def scene_engine(postgres_url, synthetic_glb):
                         creator="Fixture",
                         rights_holder="Fixture author",
                         source_reference="Synthetic scene fixture",
-                        license_reference="Permission",
-                        attribution="Fixture author",
+                        license_reference="Permission" if pin == PIN_V1 else "Second version permission",
+                        attribution="Fixture author" if pin == PIN_V1 else "Second version author",
                         modifications="None",
                     )
                     .returning(asset_sources.c.id)
@@ -929,3 +930,269 @@ def test_scene_discovery_when_no_published_version_is_eligible(
             set_owner(connection)
             connection.execute(republished)
             connection.execute(change_version(version_id, publication_state="withdrawn"))
+
+
+MANIFEST = f"{PREFIX}{DEMO_V1}/manifest"
+FILE = "/api/v1/assets/synthetic-mesh/versions/v1/file"
+
+
+@pytest.fixture
+def delivery_root(tmp_path, synthetic_glb, monkeypatch):
+    root = tmp_path / "assets"
+    target = root / glb_storage_reference(sha256(synthetic_glb).hexdigest())
+    target.parent.mkdir(parents=True, mode=0o750)
+    target.write_bytes(synthetic_glb)
+    target.chmod(0o440)
+    monkeypatch.setenv("ATLAS_ASSET_STORAGE_ROOT", str(root))
+    return target
+
+
+def test_manifest_exact_pins_roles_and_attribution(
+    delivery_root, client, scene_engine, synthetic_glb
+):
+    with scene_engine.begin() as connection:
+        set_owner(connection)
+        duplicate_test = add_version(connection, SCENE_ID, "manifest-fixture")
+        parent = connection.scalar(
+            add_node(duplicate_test, "root").returning(scene_nodes.c.id)
+        )
+        for code, pin in (("mesh-a", PIN_V1), ("mesh-b", PIN_V2), ("mesh-c", PIN_V1)):
+            connection.execute(
+                add_node(duplicate_test, code, parent_id=parent, asset_version_id=pin, sort_order=1)
+            )
+        connection.execute(publish(duplicate_test))
+        connection.execute(
+            structure_names.insert().values(
+                structure_id=PUBLIC_STRUCTURE, language="en", name="Synthetic region",
+                is_preferred=True,
+            )
+        )
+        connection.execute(
+            anatomy_asset_links.update().where(anatomy_asset_links.c.id == PUBLIC_LINK)
+            .values(role="changed")
+        )
+
+    result = client.get(MANIFEST)
+    assert result.status_code == 200, result.json()
+    body = result.json()
+    assert result.content == client.get(MANIFEST).content
+    assert result.headers["etag"] == f'"{sha256(result.content).hexdigest()}"'
+    assert client.get(MANIFEST, headers={"If-None-Match": result.headers["etag"]}).status_code == 304
+    assert body["schema_version"] == 1
+    assert body["scene"]["coordinate_profile"] == "atlas-anatomy-y-up-v1"
+    assert body["scene"]["origin_description"] == ORIGIN
+    assert body["scene"]["version"] == "v1"
+    assert [(node["code"], node["parent_code"]) for node in body["nodes"]] == [
+        ("root", None), ("mesh-a", "root"), ("mesh-b", "root"),
+    ]
+    assert body["nodes"][1]["transform"] == {
+        "translation": [0.1, 0.2, 0.3], "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0],
+    }
+    assert body["nodes"][1]["asset"] == {"code": "synthetic-mesh", "version": "v1"}
+    assert body["nodes"][1]["anatomy_links"] == [
+        {"structure_code": "synthetic-region", "role": "context"},
+    ]
+    assert body["nodes"][2]["anatomy_links"][0]["role"] is None
+    assert body["anatomy"][0]["preferred_names"][0]["name"] == "Synthetic region"
+    assert body["anatomy"][0]["laterality"] == "none"
+    assert [asset["version"] for asset in body["assets"]] == ["v1", "v2"]
+    assert body["assets"][0]["download_url"] == FILE
+    assert body["assets"][0]["sha256"] == sha256(synthetic_glb).hexdigest()
+    assert body["assets"][0]["file_size"] == len(synthetic_glb)
+    assert body["assets"][0]["mime_type"] == "model/gltf-binary"
+    assert body["assets"][0]["sources"][0]["attribution"] == "Fixture author"
+    assert body["assets"][0]["sources"][0]["license_reference"] == "Permission"
+    assert body["assets"][1]["sources"][0]["license_reference"] == "Second version permission"
+    assert body["assets"][1]["sources"][0]["attribution"] == "Second version author"
+    assert b"internal-rights-review" not in result.content
+    assert b"internal-spatial-review" not in result.content
+    assert b"storage_reference" not in result.content
+
+    separate = client.get(f"{PREFIX}{DEMO}/versions/manifest-fixture/manifest").json()
+    assert [asset["version"] for asset in separate["assets"]] == ["v1", "v2"]
+    assert [node["asset"]["version"] for node in separate["nodes"][1:]] == ["v1", "v2", "v1"]
+
+    with scene_engine.begin() as connection:
+        set_owner(connection)
+        connection.execute(
+            structure_names.update().where(structure_names.c.structure_id == PUBLIC_STRUCTURE)
+            .values(name="Renamed region")
+        )
+    changed = client.get(MANIFEST, headers={"If-None-Match": result.headers["etag"]})
+    assert changed.status_code == 200
+    assert changed.headers["etag"] != result.headers["etag"]
+    assert changed.json()["anatomy"][0]["preferred_names"][0]["name"] == "Renamed region"
+
+
+def test_binary_validators_and_storage_errors(delivery_root, client, synthetic_glb):
+    success = client.get(FILE, headers={"Range": "bytes=0-1"})
+    digest = sha256(synthetic_glb).hexdigest()
+    assert success.status_code == 200
+    assert success.content == synthetic_glb
+    assert success.headers["content-type"] == "model/gltf-binary"
+    assert success.headers["content-length"] == str(len(synthetic_glb))
+    assert success.headers["etag"] == f'"{digest}"'
+    assert success.headers["x-content-type-options"] == "nosniff"
+    assert "must-revalidate" in success.headers["cache-control"]
+    assert "accept-ranges" not in success.headers
+    condition = {"If-None-Match": f'"other,tag", W/"{digest}"'}
+    for headers in (condition, {"If-None-Match": "*"}):
+        cached = client.get(FILE, headers=headers)
+        assert cached.status_code == 304
+        assert cached.content == b""
+        assert cached.headers["etag"] == success.headers["etag"]
+
+    delivery_root.chmod(0o600)
+    delivery_root.write_bytes(synthetic_glb[:-1] + b"x")
+    delivery_root.chmod(0o440)
+    assert client.get(FILE, headers=condition).status_code == 503
+
+    delivery_root.unlink()
+    for path in (FILE, MANIFEST):
+        unavailable = client.get(path, headers={"If-None-Match": "*"})
+        assert unavailable.status_code == 503
+        assert unavailable.headers["cache-control"] == "no-store"
+        assert unavailable.json() == {"detail": "Published asset storage unavailable."}
+
+
+def test_delivery_rechecks_publication_before_using_validators(delivery_root, client, scene_engine):
+    asset = client.get(FILE)
+    manifest = client.get(MANIFEST)
+    assert asset.status_code == manifest.status_code == 200
+    for path in (
+        f"{PREFIX}/hidden/versions/v1/manifest",
+        f"{PREFIX}/withdrawn/versions/v1/manifest",
+        f"{PREFIX}{DEMO}/versions/draft/manifest",
+        f"{PREFIX}{DEMO}/versions/v0/manifest",
+        FILE.replace("/v1/file", "/draft/file"),
+    ):
+        unavailable = client.get(path, headers={"If-None-Match": "*"})
+        assert unavailable.status_code == 404
+        assert unavailable.headers["cache-control"] == "no-store"
+
+    pin = asset_versions.update().where(asset_versions.c.id == PIN_V1)
+    structure = anatomical_structures.update().where(anatomical_structures.c.id == PUBLIC_STRUCTURE)
+    try:
+        with scene_engine.begin() as connection:
+            set_owner(connection)
+            connection.execute(pin.values(publication_state="withdrawn"))
+        assert client.get(FILE, headers={"If-None-Match": asset.headers["etag"]}).status_code == 404
+        invalid_scene = client.get(MANIFEST, headers={"If-None-Match": manifest.headers["etag"]})
+        assert invalid_scene.status_code == 503
+        assert invalid_scene.json() == {"detail": "Scene asset versions unavailable."}
+        with scene_engine.begin() as connection:
+            set_owner(connection)
+            connection.execute(pin.values(publication_state="published"))
+            connection.execute(structure.values(review_state="draft"))
+        invalid_scene = client.get(MANIFEST, headers={"If-None-Match": manifest.headers["etag"]})
+        assert invalid_scene.status_code == 503
+        assert invalid_scene.json() == {"detail": "Scene anatomy annotations unavailable."}
+    finally:
+        with scene_engine.begin() as connection:
+            set_owner(connection)
+            connection.execute(pin.values(publication_state="published"))
+            connection.execute(structure.values(review_state="published"))
+
+
+@pytest.mark.parametrize(
+    ("variable", "message"),
+    [
+        ("ATLAS_MANIFEST_MAX_NODES", "Scene manifest node limit exceeded."),
+        ("ATLAS_MANIFEST_MAX_ASSETS", "Scene manifest asset version limit exceeded."),
+        ("ATLAS_MANIFEST_MAX_BYTES", "Scene manifest serialized size limit exceeded."),
+    ],
+)
+def test_manifest_limits(
+    delivery_root, scene_engine, postgres_url, monkeypatch, variable, message
+):
+    monkeypatch.setenv(variable, "1")
+    monkeypatch.setenv(RUNTIME_DATABASE_ENV, postgres_url(RUNTIME_ROLE).render_as_string())
+    with TestClient(create_app()) as api:
+        response = api.get(MANIFEST)
+    assert response.status_code == 503
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {"detail": message}
+
+
+def test_manifest_build_uses_one_snapshot(delivery_root, client, scene_engine, monkeypatch):
+    original = queries.get_version
+    pin = asset_versions.update().where(asset_versions.c.id == PIN_V1)
+
+    def withdraw_after_scene_read(*args, **kwargs):
+        scene = original(*args, **kwargs)
+        with scene_engine.begin() as connection:
+            set_owner(connection)
+            connection.execute(pin.values(publication_state="withdrawn"))
+        return scene
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(queries, "get_version", withdraw_after_scene_read)
+            response = client.get(MANIFEST)
+        assert response.status_code == 200
+        assert response.json()["assets"][0]["version"] == "v1"
+        later = client.get(MANIFEST)
+        assert later.status_code == 503
+        assert later.json() == {"detail": "Scene asset versions unavailable."}
+    finally:
+        with scene_engine.begin() as connection:
+            set_owner(connection)
+            connection.execute(pin.values(publication_state="published"))
+
+
+def test_manifest_rejects_oversized_origin_before_loading_nodes(
+    scene_engine, postgres_url, monkeypatch
+):
+    origin = "é" * 3000  # Fewer than 4096 characters, more than 4096 UTF-8 bytes.
+    with scene_engine.begin() as connection:
+        set_owner(connection)
+        version_id = add_version(connection, SCENE_ID, "oversized-origin")
+        connection.execute(change_version(version_id, origin_description=origin))
+        connection.execute(publish(version_id))
+
+    def unexpected_node_query(*args):
+        pytest.fail("Oversized origin must be rejected before reading scene nodes.")
+
+    monkeypatch.setattr(queries, "nodes_query", unexpected_node_query)
+    monkeypatch.setenv("ATLAS_MANIFEST_MAX_BYTES", "4096")
+    monkeypatch.setenv(RUNTIME_DATABASE_ENV, postgres_url(RUNTIME_ROLE).render_as_string())
+    original = queries.get_version
+
+    def check_projection(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if kwargs.get("origin_byte_limit") is not None:
+            assert result.origin_description is None
+        return result
+
+    monkeypatch.setattr(queries, "get_version", check_projection)
+    detail_path = f"{PREFIX}{DEMO}/versions/oversized-origin"
+    with TestClient(create_app()) as api:
+        response = api.get(f"{detail_path}/manifest", headers={"If-None-Match": "*"})
+        assert response.status_code == 503
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json() == {"detail": "Scene manifest serialized size limit exceeded."}
+        assert api.get(detail_path).json()["origin_description"] == origin
+
+
+def test_manifest_preflight_has_independent_bounded_capacity(delivery_root, client):
+    state = client.app.state
+    for _ in range(state.delivery_settings.file_slots):
+        assert state.delivery_slots.acquire(blocking=False)
+    try:
+        assert client.get(FILE).status_code == 503
+        assert client.get(MANIFEST).status_code == 200
+    finally:
+        for _ in range(state.delivery_settings.file_slots):
+            state.delivery_slots.release()
+
+    for _ in range(state.delivery_settings.manifest_slots):
+        assert state.manifest_slots.acquire(blocking=False)
+    try:
+        response = client.get(MANIFEST)
+        assert response.status_code == 503
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json() == {"detail": "Scene manifest capacity unavailable."}
+    finally:
+        for _ in range(state.delivery_settings.manifest_slots):
+            state.manifest_slots.release()

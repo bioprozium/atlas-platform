@@ -344,6 +344,69 @@
         "title": "LocalTransform",
         "type": "object"
       },
+      "ManifestAsset": {
+        "properties": {
+          "code": {
+            "description": "Stable public asset code.",
+            "title": "Code",
+            "type": "string"
+          },
+          "download_url": {
+            "description": "Origin-relative URL for this exact GLB version.",
+            "title": "Download Url",
+            "type": "string"
+          },
+          "file_size": {
+            "description": "Size of the GLB in bytes.",
+            "title": "File Size",
+            "type": "integer"
+          },
+          "format": {
+            "const": "glb",
+            "title": "Format",
+            "type": "string"
+          },
+          "mime_type": {
+            "const": "model/gltf-binary",
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Lowercase hexadecimal digest of the GLB bytes.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/AssetSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "description": "Immutable version identifier within the asset.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "sha256",
+          "file_size",
+          "format",
+          "mime_type",
+          "sources",
+          "code",
+          "title",
+          "download_url"
+        ],
+        "title": "ManifestAsset",
+        "type": "object"
+      },
       "NotReadyResponse": {
         "properties": {
           "status": {
@@ -702,6 +765,49 @@
           "versions"
         ],
         "title": "SceneDetail",
+        "type": "object"
+      },
+      "SceneManifest": {
+        "properties": {
+          "anatomy": {
+            "items": {
+              "$ref": "#/components/schemas/StructureSummary"
+            },
+            "title": "Anatomy",
+            "type": "array"
+          },
+          "assets": {
+            "items": {
+              "$ref": "#/components/schemas/ManifestAsset"
+            },
+            "title": "Assets",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/SceneNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "scene": {
+            "$ref": "#/components/schemas/SceneVersionDetail"
+          },
+          "schema_version": {
+            "const": 1,
+            "description": "Version of the scene manifest format.",
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "scene",
+          "nodes",
+          "assets",
+          "anatomy"
+        ],
+        "title": "SceneManifest",
         "type": "object"
       },
       "SceneNode": {
@@ -2108,6 +2214,171 @@
         ]
       }
     },
+    "/api/v1/assets/{code}/versions/{version}/file": {
+      "get": {
+        "description": "Download the complete verified GLB for an exact published asset version.",
+        "operationId": "getAssetFile",
+        "parameters": [
+          {
+            "description": "Stable public code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "description": "Stable public code.",
+              "maxLength": 80,
+              "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Immutable version identifier.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "Immutable version identifier.",
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Return 304 for an available matching representation.",
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "model/gltf-binary": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "Cache-Control": {
+                "description": "Revalidate before cache reuse and preserve the representation bytes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "Verified byte length of the GLB.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "ETag": {
+                "description": "Strong SHA-256 validator.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Prevents content type sniffing.",
+                "schema": {
+                  "const": "nosniff",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The available representation matches.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Revalidate before cache reuse and preserve the representation bytes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "Strong SHA-256 validator.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Prevents content type sniffing.",
+                "schema": {
+                  "const": "nosniff",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The published asset version was not found.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Do not store errors.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error",
+            "headers": {
+              "Cache-Control": {
+                "description": "Do not store errors.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Asset registry, published asset storage, or delivery capacity unavailable.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Do not store errors.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Asset File",
+        "tags": [
+          "Assets"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "description": "Check whether the API process is responding.",
@@ -2398,6 +2669,164 @@
           }
         },
         "summary": "Get Version",
+        "tags": [
+          "Scenes"
+        ]
+      }
+    },
+    "/api/v1/scenes/{code}/versions/{version}/manifest": {
+      "get": {
+        "description": "Retrieve the complete offline manifest for an exact published scene version.",
+        "operationId": "getSceneManifest",
+        "parameters": [
+          {
+            "description": "Stable public code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "description": "Stable public code.",
+              "maxLength": 80,
+              "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Immutable version identifier.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "Immutable version identifier.",
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Return 304 for an available matching representation.",
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SceneManifest"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "Cache-Control": {
+                "description": "Revalidate before cache reuse and preserve the representation bytes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "Strong SHA-256 validator.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Prevents content type sniffing.",
+                "schema": {
+                  "const": "nosniff",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The available representation matches.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Revalidate before cache reuse and preserve the representation bytes.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "Strong SHA-256 validator.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Prevents content type sniffing.",
+                "schema": {
+                  "const": "nosniff",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The published scene version was not found.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Do not store errors.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error",
+            "headers": {
+              "Cache-Control": {
+                "description": "Do not store errors.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Database, dependencies, storage or capacity unavailable, or manifest limit exceeded.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Do not store errors.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Scene Manifest",
         "tags": [
           "Scenes"
         ]

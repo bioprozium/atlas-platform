@@ -77,7 +77,7 @@ Scientific verification is an editorial requirement. The public API serves recor
 
 An asset and its version both need published status for the API to return that version. The page format, default limit of 50, and maximum limit of 100 match the anatomy API. The asset and structure asset listings accept `q` for case-insensitive literal substring matching on asset code or title. A missing or ineligible detail returns 404. A published structure with no eligible links returns an empty page. Invalid parameters return 422. A database failure returns 503 with `{"detail":"Asset registry database unavailable."}`.
 
-Use the asset code and version identifier together as the public identifier. Asset codes follow the anatomy code convention. Version identifiers are lowercase ASCII alphanumeric tokens separated by dots, underscores, or hyphens, up to 80 characters. Treat them as opaque identifiers. Each version includes its SHA-256 digest, file size in bytes, format, MIME type, and source records. The API exposes metadata only. [OpenAPI v1](../contracts/openapi.v1.json)
+Use the asset code and version identifier together as the public identifier. Asset codes follow the anatomy code convention. Version identifiers are lowercase ASCII alphanumeric tokens separated by dots, underscores, or hyphens, up to 80 characters. Treat them as opaque identifiers. Each version includes its SHA-256 digest, file size in bytes, format, MIME type, and source records. Binary delivery is served separately through the exact-version file endpoint. [Scene manifest and delivery](../docs/SCENE-MANIFEST.md) [OpenAPI v1](../contracts/openapi.v1.json)
 
 ### Editorial publication
 

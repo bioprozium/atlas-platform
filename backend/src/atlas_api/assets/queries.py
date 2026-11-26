@@ -144,20 +144,23 @@ def get_asset(connection: Connection, code: str, filters: Pagination) -> AssetDe
     )
 
 
+def eligible_versions(*fields) -> Select:
+    return (
+        select(*fields)
+        .select_from(assets.join(asset_versions, asset.id == version.asset_id))
+        .where(PUBLISHED_ASSET, PUBLISHED_VERSION)
+    )
+
+
+def exact_version(connection: Connection, code: str, identifier: str, *fields) -> RowMapping | None:
+    query = eligible_versions(*fields).where(asset.code == code, version.version == identifier)
+    return connection.execute(query).mappings().one_or_none()
+
+
 def get_version(
     connection: Connection, code: str, identifier: str
 ) -> AssetVersionDetail | None:
-    query = (
-        select(*ASSET_FIELDS, *VERSION_FIELDS)
-        .select_from(assets.join(asset_versions, asset.id == version.asset_id))
-        .where(
-            asset.code == code,
-            version.version == identifier,
-            PUBLISHED_ASSET,
-            PUBLISHED_VERSION,
-        )
-    )
-    row = connection.execute(query).mappings().one_or_none()
+    row = exact_version(connection, code, identifier, *ASSET_FIELDS, *VERSION_FIELDS)
     if row is None:
         return None
     sources = sources_by_version(connection, [row])

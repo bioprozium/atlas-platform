@@ -9,6 +9,7 @@ description = "Open 3D Atlas REST API"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.13,<2",
+    "anyio>=4,<5",
     "fastapi>=0.165,<1",
     "psycopg[binary]>=3.2,<4",
     "pydantic>=2,<3",
