@@ -1,12 +1,10 @@
 """Read-only routes for the Human Anatomy domain."""
 
-from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from sqlalchemy import Connection
-from sqlalchemy.exc import SQLAlchemyError
 
 from atlas_api.anatomy import queries
 from atlas_api.anatomy.models import CODE_LENGTH, CODE_PATTERN
@@ -21,6 +19,7 @@ from atlas_api.anatomy.schemas import (
     System,
     SystemFilters,
 )
+from atlas_api.api.dependencies import read_connection
 
 router = APIRouter(
     prefix="/anatomy",
@@ -40,17 +39,8 @@ PublicCode = Annotated[
 ]
 
 
-@contextmanager
-def anatomy_connection(request: Request) -> Iterator[Connection]:
-    engine = request.app.state.database_engine
-    if engine is None:
-        raise HTTPException(503, "Anatomy database unavailable.")
-    try:
-        with engine.connect() as connection:
-            # Keep response components on the same snapshot as the published parent.
-            yield connection.execution_options(isolation_level="REPEATABLE READ")
-    except SQLAlchemyError:
-        raise HTTPException(503, "Anatomy database unavailable.") from None
+def anatomy_connection(request: Request) -> AbstractContextManager[Connection]:
+    return read_connection(request, "Anatomy database unavailable.")
 
 
 @router.get("/systems", operation_id="listAnatomicalSystems")

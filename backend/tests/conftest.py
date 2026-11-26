@@ -5,6 +5,7 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
+from struct import pack
 from tempfile import TemporaryDirectory
 
 import pytest
@@ -13,6 +14,13 @@ from sqlalchemy.engine import URL
 from atlas_api.config import DATABASE_NAME
 
 BACKEND = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(scope="module")
+def synthetic_glb():
+    payload = b'{"asset":{"version":"2.0"}}'
+    payload += b" " * (-len(payload) % 4)
+    return pack("<4sIII4s", b"glTF", 2, 20 + len(payload), len(payload), b"JSON") + payload
 
 
 def run_postgres(*args: str) -> str:

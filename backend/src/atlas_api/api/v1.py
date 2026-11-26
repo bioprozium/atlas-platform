@@ -5,10 +5,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from atlas_api.anatomy.router import router as anatomy_router
+from atlas_api.assets.router import router as asset_router
 from atlas_api.db import database_is_ready
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(anatomy_router)
+router.include_router(asset_router)
 
 
 class HealthResponse(BaseModel):

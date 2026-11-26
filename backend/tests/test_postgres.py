@@ -27,6 +27,12 @@ ANATOMY_TABLES = {
     "structure_relations",
     "external_identifiers",
 }
+REGISTRY_TABLES = {"assets", "asset_versions", "asset_sources", "anatomy_asset_links"}
+REGISTRY_FUNCTIONS = [
+    "preserve_asset_identity",
+    "preserve_asset_version",
+    "invalidate_asset_rights_review",
+]
 
 
 def test_runtime_readiness_with_postgres(monkeypatch, postgres_url):
@@ -62,7 +68,9 @@ def test_migrations_use_owner_role_and_atlas_schema(monkeypatch, postgres_url):
     url = postgres_url(MIGRATION_ROLE)
     monkeypatch.setenv(MIGRATION_DATABASE_ENV, url.render_as_string())
     config = Config(str(BACKEND / "alembic.ini"))
-    tables = sorted(ANATOMY_TABLES | {"anatomy_hierarchy_write_guard", "alembic_version"})
+    tables = sorted(
+        ANATOMY_TABLES | REGISTRY_TABLES | {"anatomy_hierarchy_write_guard", "alembic_version"}
+    )
 
     with create_engine(url, poolclass=NullPool).connect() as connection:
         identity = connection.execute(
@@ -90,9 +98,27 @@ def test_migrations_use_owner_role_and_atlas_schema(monkeypatch, postgres_url):
         assert unavailable.status_code == 503
         assert unavailable.json() == {"detail": "Anatomy database unavailable."}
 
+    command.upgrade(config, "0002")
+    with create_engine(url, poolclass=NullPool).begin() as connection:
+        connection.execute(text("SET LOCAL ROLE atlas_owner"))
+        connection.execute(
+            text(
+                "INSERT INTO atlas.anatomical_structures "
+                "(code, structure_kind, laterality, review_state) "
+                "VALUES ('migration-witness', 'bone', 'none', 'published')"
+            )
+        )
+    with TestClient(create_app()) as client:
+        assert client.get("/api/v1/assets").status_code == 503
+
     command.upgrade(config, "head")
     command.check(config)
 
+    registry_functions = text(
+        "SELECT proname, pg_get_userbyid(proowner) FROM pg_proc "
+        "JOIN pg_namespace ON pronamespace = pg_namespace.oid "
+        "WHERE nspname = 'atlas' AND proname = ANY(:names)"
+    )
     with create_engine(url, poolclass=NullPool).connect() as connection:
         locations = connection.execute(
             text(
@@ -102,10 +128,12 @@ def test_migrations_use_owner_role_and_atlas_schema(monkeypatch, postgres_url):
             {"tables": tables},
         ).all()
         assert set(locations) == {(table, "atlas", "atlas_owner") for table in tables}
+        functions = connection.execute(registry_functions, {"names": REGISTRY_FUNCTIONS}).all()
+        assert set(functions) == {(name, "atlas_owner") for name in REGISTRY_FUNCTIONS}
 
     with create_engine(runtime_url, poolclass=NullPool).connect() as connection:
         revision = connection.scalar(text("SELECT version_num FROM atlas.alembic_version"))
-        assert revision == ScriptDirectory.from_config(config).get_current_head() == "0002"
+        assert revision == ScriptDirectory.from_config(config).get_current_head() == "0003"
         access = connection.execute(
             text(
                 "SELECT has_schema_privilege(current_user, 'atlas', 'CREATE'), "
@@ -114,7 +142,7 @@ def test_migrations_use_owner_role_and_atlas_schema(monkeypatch, postgres_url):
             )
         ).one()
         assert access == (False, False)
-        for table in ANATOMY_TABLES:
+        for table in ANATOMY_TABLES | REGISTRY_TABLES:
             access = connection.execute(
                 text(
                     "SELECT has_table_privilege(current_user, :table, 'SELECT'), "
@@ -124,10 +152,32 @@ def test_migrations_use_owner_role_and_atlas_schema(monkeypatch, postgres_url):
                 {"table": f"atlas.{table}"},
             ).one()
             assert access == (True, False)
-            assert connection.scalar(text(f"SELECT count(*) FROM atlas.{table}")) == 0
+            assert connection.scalar(text(f"SELECT count(*) FROM atlas.{table}")) == (
+                1 if table == "anatomical_structures" else 0
+            )
         assert not connection.scalar(
             text("SELECT has_table_privilege('atlas.anatomy_hierarchy_write_guard', 'SELECT')")
         )
+
+    path = "/api/v1/anatomy/structures/migration-witness"
+    with TestClient(create_app()) as client:
+        assert client.get(f"{path}/assets").json()["items"] == []
+        command.downgrade(config, "0002")
+        assert client.get("/api/v1/assets").status_code == 503
+        assert client.get(path).json()["code"] == "migration-witness"
+        with create_engine(runtime_url, poolclass=NullPool).connect() as connection:
+            revision = connection.scalar(text("SELECT version_num FROM atlas.alembic_version"))
+            assert revision == "0002"
+            remaining = connection.execute(
+                text("SELECT tablename FROM pg_tables WHERE tablename = ANY(:tables)"),
+                {"tables": sorted(REGISTRY_TABLES)},
+            ).all()
+            assert remaining == []
+            assert connection.execute(registry_functions, {"names": REGISTRY_FUNCTIONS}).all() == []
+        command.upgrade(config, "0003")
+        assert client.get("/api/v1/assets").json()["items"] == []
+        assert client.get(f"{path}/assets").json()["items"] == []
+        command.check(config)
 
     command.downgrade(config, "0001")
     with create_engine(runtime_url, poolclass=NullPool).connect() as connection:
