@@ -1,6 +1,76 @@
 {
   "components": {
     "schemas": {
+      "Direction": {
+        "enum": [
+          "incoming",
+          "outgoing"
+        ],
+        "title": "Direction",
+        "type": "string"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "ExternalIdentifier": {
+        "properties": {
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "source": {
+            "description": "Citation or source of the external mapping.",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Version"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "value",
+          "source",
+          "source_version"
+        ],
+        "title": "ExternalIdentifier",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "status": {
@@ -14,6 +84,24 @@
         ],
         "title": "HealthResponse",
         "type": "object"
+      },
+      "Language": {
+        "enum": [
+          "la",
+          "en",
+          "az"
+        ],
+        "title": "Language",
+        "type": "string"
+      },
+      "Laterality": {
+        "enum": [
+          "left",
+          "right",
+          "none"
+        ],
+        "title": "Laterality",
+        "type": "string"
       },
       "NotReadyResponse": {
         "properties": {
@@ -29,6 +117,102 @@
         "title": "NotReadyResponse",
         "type": "object"
       },
+      "Page_StructureRelation_": {
+        "properties": {
+          "has_more": {
+            "description": "Whether more matching items followed this page.",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StructureRelation"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "Page[StructureRelation]",
+        "type": "object"
+      },
+      "Page_StructureSummary_": {
+        "properties": {
+          "has_more": {
+            "description": "Whether more matching items followed this page.",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StructureSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "Page[StructureSummary]",
+        "type": "object"
+      },
+      "Page_System_": {
+        "properties": {
+          "has_more": {
+            "description": "Whether more matching items followed this page.",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/System"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "Page[System]",
+        "type": "object"
+      },
       "ReadinessResponse": {
         "properties": {
           "status": {
@@ -42,6 +226,209 @@
         ],
         "title": "ReadinessResponse",
         "type": "object"
+      },
+      "RelationType": {
+        "enum": [
+          "part_of",
+          "is_a"
+        ],
+        "title": "RelationType",
+        "type": "string"
+      },
+      "StructureDetail": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "external_identifiers": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalIdentifier"
+            },
+            "title": "External Identifiers",
+            "type": "array"
+          },
+          "laterality": {
+            "$ref": "#/components/schemas/Laterality",
+            "description": "Use none for non-lateral structures."
+          },
+          "names": {
+            "items": {
+              "$ref": "#/components/schemas/StructureName"
+            },
+            "title": "Names",
+            "type": "array"
+          },
+          "structure_kind": {
+            "$ref": "#/components/schemas/StructureKind",
+            "description": "Anatomical category of the structure."
+          },
+          "systems": {
+            "items": {
+              "$ref": "#/components/schemas/System"
+            },
+            "title": "Systems",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "structure_kind",
+          "laterality",
+          "names",
+          "systems",
+          "external_identifiers"
+        ],
+        "title": "StructureDetail",
+        "type": "object"
+      },
+      "StructureKind": {
+        "enum": [
+          "bone",
+          "organ",
+          "organ_part",
+          "region",
+          "tissue",
+          "joint",
+          "aggregate"
+        ],
+        "title": "StructureKind",
+        "type": "string"
+      },
+      "StructureName": {
+        "properties": {
+          "is_preferred": {
+            "title": "Is Preferred",
+            "type": "boolean"
+          },
+          "language": {
+            "$ref": "#/components/schemas/Language"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language",
+          "name",
+          "is_preferred"
+        ],
+        "title": "StructureName",
+        "type": "object"
+      },
+      "StructureRelation": {
+        "properties": {
+          "relation_type": {
+            "$ref": "#/components/schemas/RelationType"
+          },
+          "source_code": {
+            "description": "Code of the part or subtype.",
+            "title": "Source Code",
+            "type": "string"
+          },
+          "target_code": {
+            "description": "Code of the whole or supertype.",
+            "title": "Target Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_code",
+          "relation_type",
+          "target_code"
+        ],
+        "title": "StructureRelation",
+        "type": "object"
+      },
+      "StructureSummary": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "laterality": {
+            "$ref": "#/components/schemas/Laterality",
+            "description": "Use none for non-lateral structures."
+          },
+          "preferred_names": {
+            "items": {
+              "$ref": "#/components/schemas/StructureName"
+            },
+            "title": "Preferred Names",
+            "type": "array"
+          },
+          "structure_kind": {
+            "$ref": "#/components/schemas/StructureKind",
+            "description": "Anatomical category of the structure."
+          }
+        },
+        "required": [
+          "code",
+          "structure_kind",
+          "laterality",
+          "preferred_names"
+        ],
+        "title": "StructureSummary",
+        "type": "object"
+      },
+      "System": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "System",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
       }
     }
   },
@@ -51,6 +438,509 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/anatomy/structures": {
+      "get": {
+        "description": "List published structures with preferred names in code order.",
+        "operationId": "listAnatomicalStructures",
+        "parameters": [
+          {
+            "description": "Maximum number of items to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of items to return.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of matching items to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of matching items to skip.",
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Include members of this published system.",
+            "in": "query",
+            "name": "system_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Include members of this published system.",
+              "title": "System Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "laterality",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Laterality"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Laterality"
+            }
+          },
+          {
+            "description": "Require a name in this language. Also limits the names matched by q.",
+            "in": "query",
+            "name": "language",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Language"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Require a name in this language. Also limits the names matched by q.",
+              "title": "Language"
+            }
+          },
+          {
+            "description": "Substring of a preferred name or synonym.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "pattern": "^[^\\x00]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Substring of a preferred name or synonym.",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_StructureSummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The anatomy database is unavailable."
+          }
+        },
+        "summary": "List Structures",
+        "tags": [
+          "Anatomy"
+        ]
+      }
+    },
+    "/api/v1/anatomy/structures/{code}": {
+      "get": {
+        "description": "Retrieve a published structure with names, system memberships, and external identifiers.",
+        "operationId": "getAnatomicalStructure",
+        "parameters": [
+          {
+            "description": "Stable public code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "description": "Stable public code.",
+              "maxLength": 80,
+              "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+              "title": "Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StructureDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The published structure was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The anatomy database is unavailable."
+          }
+        },
+        "summary": "Get Structure",
+        "tags": [
+          "Anatomy"
+        ]
+      }
+    },
+    "/api/v1/anatomy/structures/{code}/relations": {
+      "get": {
+        "description": "List direct relations between published structures in source, target, and type order.",
+        "operationId": "listAnatomicalStructureRelations",
+        "parameters": [
+          {
+            "description": "Stable public code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "description": "Stable public code.",
+              "maxLength": 80,
+              "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of items to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of items to return.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of matching items to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of matching items to skip.",
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "relation_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RelationType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Relation Type"
+            }
+          },
+          {
+            "description": "Direction relative to the requested structure. Omit for both directions.",
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Direction"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Direction relative to the requested structure. Omit for both directions.",
+              "title": "Direction"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_StructureRelation_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The published structure was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The anatomy database is unavailable."
+          }
+        },
+        "summary": "List Relations",
+        "tags": [
+          "Anatomy"
+        ]
+      }
+    },
+    "/api/v1/anatomy/systems": {
+      "get": {
+        "description": "List published anatomical systems in code order.",
+        "operationId": "listAnatomicalSystems",
+        "parameters": [
+          {
+            "description": "Maximum number of items to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum number of items to return.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of matching items to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of matching items to skip.",
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Substring of the system code or name.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "pattern": "^[^\\x00]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Substring of the system code or name.",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_System_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The anatomy database is unavailable."
+          }
+        },
+        "summary": "List Systems",
+        "tags": [
+          "Anatomy"
+        ]
+      }
+    },
+    "/api/v1/anatomy/systems/{code}": {
+      "get": {
+        "description": "Retrieve a published anatomical system by its public code.",
+        "operationId": "getAnatomicalSystem",
+        "parameters": [
+          {
+            "description": "Stable public code.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "description": "Stable public code.",
+              "maxLength": 80,
+              "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+              "title": "Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/System"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The published system was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The anatomy database is unavailable."
+          }
+        },
+        "summary": "Get System",
+        "tags": [
+          "Anatomy"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "description": "Check whether the API process is responding.",
